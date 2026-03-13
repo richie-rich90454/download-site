@@ -6,6 +6,8 @@ const path = require("path")
 const uaParser = require("ua-parser-js")
 
 const app = express()
+app.set("trust proxy", true)
+
 const PORT = process.env.PORT || 3000
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN
 const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache")
