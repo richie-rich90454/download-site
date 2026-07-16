@@ -73,6 +73,10 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
     private tagFromCache = false;
     private throwOnList = false;
     private throwOnTag = false;
+    private throwNonErrorOnList = false;
+    private throwNonErrorOnTag = false;
+    private returnUndefinedForTag = false;
+    private returnUndefinedRelease = false;
 
     setReleases(releases: types.GitHubRelease[]): void {
         this.releases = releases;
@@ -94,9 +98,35 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
         this.throwOnTag = throwOnTag;
     }
 
+    setThrowNonErrorOnList(throwNonError: boolean): void {
+        this.throwNonErrorOnList = throwNonError;
+    }
+
+    setThrowNonErrorOnTag(throwNonError: boolean): void {
+        this.throwNonErrorOnTag = throwNonError;
+    }
+
+    setReturnUndefinedForTag(returnUndefined: boolean): void {
+        this.returnUndefinedForTag = returnUndefined;
+    }
+
+    setReturnUndefinedRelease(returnUndefined: boolean): void {
+        this.returnUndefinedRelease = returnUndefined;
+    }
+
     async listReleases(): Promise<githubTypes.FetchResult<types.GitHubRelease[]>> {
         if (this.throwOnList) {
             throw new Error("list error");
+        }
+        if (this.throwNonErrorOnList) {
+            throw "non-error list";
+        }
+        if (this.returnUndefinedRelease) {
+            return {
+                data: [undefined as unknown as types.GitHubRelease],
+                etag: '"etag"',
+                fromCache: false
+            };
         }
         if (this.listFromCache) {
             return { data: [] as types.GitHubRelease[], etag: '"etag"', fromCache: true };
@@ -107,6 +137,12 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
     async getReleaseByTag(repo: string, tag: string): Promise<githubTypes.FetchResult<types.GitHubRelease>> {
         if (this.throwOnTag) {
             throw new Error("tag error");
+        }
+        if (this.throwNonErrorOnTag) {
+            throw "non-error tag";
+        }
+        if (this.returnUndefinedForTag) {
+            return { data: undefined as unknown as types.GitHubRelease, etag: '"etag"', fromCache: false };
         }
         for (let i = 0; i < this.releases.length; i = i + 1) {
             if (this.releases[i].tag_name === tag) {
@@ -195,6 +231,19 @@ describe("ReleaseService", function () {
         expect(latest.tag).toBe("v1.1.0");
     });
 
+    it("sorts releases by descending published date", async function () {
+        provider.setReleases([
+            createGitHubRelease("v1.2.0", "2024-03-01T00:00:00Z"),
+            createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"),
+            createGitHubRelease("v1.1.0", "2024-02-01T00:00:00Z")
+        ]);
+
+        const latest = await service.getLatestRelease("app1", false);
+
+        expect(latest).toBeDefined();
+        expect(latest.tag).toBe("v1.2.0");
+    });
+
     it("gets release by tag", async function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
 
@@ -242,6 +291,19 @@ describe("ReleaseService", function () {
     it("returns cached releases when provider reports 304", async function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
         await service.listReleases("app1", {});
+        provider.setListFromCache(true);
+
+        const releases = await service.listReleases("app1", {});
+
+        expect(releases.length).toBe(1);
+        expect(releases[0].tag).toBe("v1.0.0");
+    });
+
+    it("returns cached releases when expired list refresh reports 304", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        const cached = await service.listReleases("app1", {});
+        expect(cached.length).toBe(1);
+        cache.setReleases("app1", cached, '"etag"', -1);
         provider.setListFromCache(true);
 
         const releases = await service.listReleases("app1", {});
@@ -304,5 +366,123 @@ describe("ReleaseService", function () {
         await customService.warmCache();
 
         expect(healthService.isReady()).toBe(true);
+    });
+
+    it("returns stale release when tag refresh throws", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        await service.getReleaseByTag("app1", "v1.0.0");
+        provider.setThrowOnTag(true);
+
+        const release = await service.getReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.tag).toBe("v1.0.0");
+    });
+
+    it("returns undefined asset when release is not found", async function () {
+        provider.setReturnUndefinedForTag(true);
+
+        const asset = await service.getAssetForTarget("app1", "v1.0.0", { os: "windows", arch: "x64" });
+
+        expect(asset).toBeUndefined();
+    });
+
+    it("returns cached release when expired tag refresh reports 304", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        const cachedRelease = await service.getReleaseByTag("app1", "v1.0.0");
+        expect(cachedRelease).toBeDefined();
+        cache.setRelease("app1", "v1.0.0", cachedRelease, '"etag"', -1);
+        provider.setTagFromCache(true);
+
+        const release = await service.getReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.tag).toBe("v1.0.0");
+    });
+
+    it("returns stale release when expired tag refresh throws", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        const cachedRelease = await service.getReleaseByTag("app1", "v1.0.0");
+        expect(cachedRelease).toBeDefined();
+        cache.setRelease("app1", "v1.0.0", cachedRelease, '"etag"', -1);
+        provider.setThrowOnTag(true);
+        provider.setReleases([]);
+
+        const release = await service.getReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.tag).toBe("v1.0.0");
+    });
+
+    it("throws when tag refresh fails without cache", async function () {
+        provider.setThrowOnTag(true);
+
+        await expect(service.getReleaseByTag("app1", "v1.0.0")).rejects.toThrow("tag error");
+    });
+
+    it("returns latest release when published dates are equal", async function () {
+        provider.setReleases([
+            createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"),
+            createGitHubRelease("v1.1.0", "2024-01-01T00:00:00Z")
+        ]);
+
+        const latest = await service.getLatestRelease("app1", false);
+
+        expect(latest).toBeDefined();
+    });
+
+    it("handles undefined release data during cache warming", async function () {
+        provider.setReturnUndefinedRelease(true);
+
+        await service.warmCache();
+
+        expect(healthService.isReady()).toBe(true);
+    });
+
+    it("passes pagination filters to provider", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+
+        const releases = await service.listReleases("app1", { page: 2, perPage: 10 });
+
+        expect(releases.length).toBe(1);
+    });
+
+    it("returns stale release when tag refresh throws non-error", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        const cachedRelease = await service.getReleaseByTag("app1", "v1.0.0");
+        expect(cachedRelease).toBeDefined();
+        cache.setRelease("app1", "v1.0.0", cachedRelease, '"etag"', -1);
+        provider.setThrowNonErrorOnTag(true);
+
+        const release = await service.getReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.tag).toBe("v1.0.0");
+    });
+
+    it("logs error when warming cache fails with non-error", async function () {
+        provider.setThrowNonErrorOnList(true);
+
+        await service.warmCache();
+
+        expect(healthService.isReady()).toBe(true);
+    });
+
+    it("transforms release with null body to empty notes", async function () {
+        provider.setReleases([
+            {
+                tag_name: "v1.0.0",
+                name: "Release v1.0.0",
+                body: null,
+                published_at: "2024-01-01T00:00:00Z",
+                prerelease: false,
+                assets: []
+            }
+        ]);
+
+        const release = await service.getReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.notes).toBe("");
     });
 });
