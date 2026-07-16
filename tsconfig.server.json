@@ -1,0 +1,12 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ES2022", "DOM"],
+        "outDir": "./dist/server",
+        "rootDir": "./src/server",
+        "tsBuildInfoFile": "./dist/server/.tsbuildinfo"
+    },
+    "include": ["src/server/**/*.ts"],
+    "exclude": ["node_modules", "dist", "src/public"],
+    "references": [{ "path": "./tsconfig.shared.json" }]
+}

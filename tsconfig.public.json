@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ES2022",
+        "moduleResolution": "bundler",
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "outDir": "./dist/public",
+        "rootDir": "./src/public",
+        "tsBuildInfoFile": "./dist/public/.tsbuildinfo"
+    },
+    "include": ["src/public/**/*.ts", "src/public/**/*.d.ts"],
+    "exclude": ["node_modules", "dist", "src/server", "src/shared"]
+}
