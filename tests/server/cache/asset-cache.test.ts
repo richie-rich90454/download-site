@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment node
+ */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -336,5 +339,179 @@ describe("DiskAssetCacheService", function () {
         }
 
         expect(cache).toBeDefined();
+    });
+
+    it("handles missing files during purge gracefully", async function () {
+        const data = Buffer.from("missing");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+        fs.unlinkSync(result.filePath);
+        cache.purge("app1");
+
+        expect(cache).toBeDefined();
+    });
+
+    it("handles non-error file deletion failures gracefully", async function () {
+        const data = Buffer.from("purge me");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        const existsSpy = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+        const unlinkSpy = vi.spyOn(fs, "unlinkSync").mockImplementation(function () {
+            class CustomError extends Error {}
+            throw new CustomError();
+        });
+        try {
+            cache.purge("app1");
+        } finally {
+            existsSpy.mockRestore();
+            unlinkSpy.mockRestore();
+        }
+
+        expect(cache).toBeDefined();
+    });
+
+    it("handles non-error thrown values during file deletion", async function () {
+        const data = Buffer.from("purge me");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        const existsSpy = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+        const unlinkSpy = vi.spyOn(fs, "unlinkSync").mockImplementation(function () {
+            throw "not an error";
+        });
+        try {
+            cache.purge("app1");
+        } finally {
+            existsSpy.mockRestore();
+            unlinkSpy.mockRestore();
+        }
+
+        expect(cache).toBeDefined();
+    });
+
+    it("continues evicting until enough room is made", async function () {
+        const limits: assetCache.AssetCacheLimits = { maxSize: 6, maxCount: 100, maxAgeMs: 60 * 60 * 1000 };
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
+        const data1 = Buffer.from("a");
+        const data2 = Buffer.from("b");
+        const data3 = Buffer.from("cccccc");
+        const asset1 = createAsset("first.exe", data1.length, "http://example.com/first.exe");
+        const asset2 = createAsset("second.exe", data2.length, "http://example.com/second.exe");
+        const asset3 = createAsset("third.exe", data3.length, "http://example.com/third.exe");
+        vi.mocked(undici.request)
+            .mockResolvedValueOnce(createResponse(data1))
+            .mockResolvedValueOnce(createResponse(data2))
+            .mockResolvedValueOnce(createResponse(data3));
+
+        await cache.getAssetPath("app1", "v1.0.0", asset1);
+        await cache.getAssetPath("app1", "v1.1.0", asset2);
+        await cache.getAssetPath("app1", "v1.2.0", asset3);
+
+        expect(fs.existsSync(path.join(tempDir, "assets", "app1", "v1.0.0", "first.exe"))).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, "assets", "app1", "v1.1.0", "second.exe"))).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, "assets", "app1", "v1.2.0", "third.exe"))).toBe(true);
+    });
+
+    it("leaves unexpired entries during cleanup", async function () {
+        const limits: assetCache.AssetCacheLimits = {
+            maxSize: 100 * 1024 * 1024,
+            maxCount: 100,
+            maxAgeMs: 60 * 60 * 1000
+        };
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
+        const data = Buffer.from("fresh");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+
+        const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+        const serviceRecord = cache as unknown as Record<string, () => void>;
+        serviceRecord.runCleanup();
+
+        expect(fs.existsSync(result.filePath)).toBe(true);
+    });
+
+    it("runs background cleanup via interval", async function () {
+        vi.useFakeTimers();
+        try {
+            const limits: assetCache.AssetCacheLimits = {
+                maxSize: 100 * 1024 * 1024,
+                maxCount: 100,
+                maxAgeMs: 1
+            };
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
+            const data = Buffer.from("expiring soon");
+            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+
+            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+            vi.advanceTimersByTime(60001);
+
+            expect(fs.existsSync(result.filePath)).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("aborts download when timeout fires", async function () {
+        vi.useFakeTimers();
+        try {
+            const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+            vi.mocked(undici.request).mockImplementation(function (_url, options) {
+                const signal = options === undefined ? undefined : options.signal;
+                return new Promise(function (_resolve, reject) {
+                    if (signal !== undefined) {
+                        signal.addEventListener("abort", function () {
+                            reject(new Error("download aborted"));
+                        });
+                    }
+                });
+            });
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+            const promise = cache.getAssetPath("app1", "v1.0.0", asset);
+            vi.advanceTimersByTime(300001);
+
+            await expect(promise).rejects.toThrow("download aborted");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("cleans up temp file when file stream errors", async function () {
+        const data = Buffer.from("hello");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(12345);
+        const assetDir = path.join(tempDir, "assets", "app1", "v1.0.0");
+        fs.mkdirSync(assetDir, { recursive: true });
+        const tempPath = path.join(assetDir, "app.exe.tmp12345");
+        fs.writeFileSync(tempPath, "");
+        const errorStream = new stream.PassThrough();
+        (errorStream as unknown as { on: (event: string, listener: (err: Error) => void) => void }).on = function (
+            event: string,
+            listener: (err: Error) => void
+        ): void {
+            if (event === "error") {
+                listener(new Error("write failed"));
+            }
+        };
+        const createWriteStreamSpy = vi
+            .spyOn(fs, "createWriteStream")
+            .mockReturnValue(errorStream as unknown as fs.WriteStream);
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow("write failed");
+        expect(fs.existsSync(tempPath)).toBe(false);
+
+        dateNowSpy.mockRestore();
+        createWriteStreamSpy.mockRestore();
     });
 });
