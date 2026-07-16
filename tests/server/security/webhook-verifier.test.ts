@@ -3,7 +3,7 @@ import * as crypto from "node:crypto";
 import * as webhookVerifier from "../../../src/server/security/webhook-verifier.js";
 import { SilentLogger } from "../test-helpers.js";
 
-function createRequest(body: unknown, signature?: string): Record<string, unknown> {
+function createRequest(body: unknown, signature?: string | string[]): Record<string, unknown> {
     const headers: Record<string, unknown> = {};
     if (signature !== undefined) {
         headers["x-hub-signature-256"] = signature;
@@ -66,6 +66,23 @@ describe("buildWebhookVerifier", function () {
         const signature = "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex");
         const verify = webhookVerifier.buildWebhookVerifier({ secret: secret, logger: new SilentLogger() });
         const request = createRequest(payload, signature);
+        const replyResult = createReply();
+        const reply = replyResult.reply;
+        const statusCode = replyResult.statusCode;
+        const done = vi.fn();
+
+        verify(request as never, reply as never, done);
+
+        expect(statusCode.value).toBe(0);
+        expect(done).toHaveBeenCalled();
+    });
+
+    it("verifies request with array signature header", function () {
+        const secret = "webhook-secret";
+        const payload = '{"action":"published"}';
+        const signature = "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex");
+        const verify = webhookVerifier.buildWebhookVerifier({ secret: secret, logger: new SilentLogger() });
+        const request = createRequest(payload, [signature, "ignored"]);
         const replyResult = createReply();
         const reply = replyResult.reply;
         const statusCode = replyResult.statusCode;
