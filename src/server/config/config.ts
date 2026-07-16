@@ -79,8 +79,7 @@ function parseConfigObject(raw: string): Record<string, unknown> {
     try {
         parsed = JSON.parse(raw) as unknown;
     } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        throw new Error("CONFIG_PATH file is not valid JSON: " + message, { cause: err });
+        throw new Error("CONFIG_PATH file is not valid JSON: " + String(err), { cause: err });
     }
     if (parsed === null || typeof parsed !== "object") {
         throw new Error("CONFIG_PATH file must contain a JSON object");
