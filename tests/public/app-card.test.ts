@@ -471,6 +471,57 @@ describe("app-card", function () {
         }
     });
 
+    test("handles empty button text when copying", async function () {
+        const release: PublicRelease = {
+            tag: "v1.0.0",
+            name: "v1.0.0",
+            notes: "Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: []
+        };
+        const update: UpdateResponse = {
+            version: "v1.0.0",
+            publishedAt: "2024-01-01T00:00:00Z",
+            releaseNotes: "Notes",
+            assets: [
+                {
+                    name: "app-windows-x64.exe",
+                    size: 1024,
+                    contentType: "application/x-msdownload",
+                    url: "https://example.com/asset.exe",
+                    browserDownloadUrl: "https://example.com/asset.exe"
+                }
+            ]
+        };
+        fetchMock.mockImplementation(function (url: string) {
+            if (url.indexOf("/api/releases/") >= 0) {
+                return Promise.resolve(createFetchResponse({ releases: [release] }));
+            }
+            return Promise.resolve(createFetchResponse(update));
+        });
+        vi.stubGlobal("navigator", {
+            clipboard: {
+                writeText: vi.fn().mockResolvedValue(undefined)
+            },
+            onLine: true
+        });
+        const card = createAppCard(store, modal, "randmatqugea", "RandMatQuGeA");
+        await card.load();
+        const copyButton = Array.from(card.element.querySelectorAll(".btn-copy")).find(function (button) {
+            return button.textContent === "Copy install command";
+        }) as HTMLButtonElement | undefined;
+        expect(copyButton).not.toBeUndefined();
+        if (copyButton !== undefined) {
+            copyButton.textContent = "";
+            copyButton.click();
+            await new Promise(function (resolve) {
+                setTimeout(resolve, 50);
+            });
+            expect(copyButton.textContent).toBe("Copied!");
+        }
+    });
+
     test("renders no releases match message when filter is active", async function () {
         const release1: PublicRelease = {
             tag: "v1.0.0",

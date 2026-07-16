@@ -474,6 +474,20 @@ vitest.describe("buildApp", function () {
         vitest.expect(response.statusCode).toBe(404);
     });
 
+    vitest.it("returns update metadata for a specific version", async function () {
+        const release = createRelease("v2.0.0");
+        const mockRelease = services.release as unknown as MockReleaseService;
+        mockRelease.setReleases([release]);
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({ method: "GET", url: "/api/update/app1?version=v2.0.0" });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.version).toBe("v2.0.0");
+        vitest.expect(body.assets.length).toBe(2);
+    });
+
     vitest.it("returns updater error status", async function () {
         const mockTauri = services.tauriUpdater as unknown as MockTauriUpdaterService;
         mockTauri.result = { status: 400, body: { error: "bad request" } };
@@ -539,6 +553,86 @@ vitest.describe("buildApp", function () {
 
         vitest.expect(response.statusCode).toBe(200);
         vitest.expect(response.headers["content-type"]).toBe("application/xml");
+        vitest.expect(response.payload).toContain("<rss>");
+    });
+
+    vitest.it("passes current_version to tauri v2 updater", async function () {
+        const mockTauri = services.tauriUpdater as unknown as MockTauriUpdaterService;
+        mockTauri.result = {
+            status: 200,
+            body: {
+                version: "1.0.0",
+                notes: "Notes",
+                pub_date: "2024-01-01T00:00:00Z",
+                platforms: {}
+            }
+        };
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/api/update/tauri-v2/app1?current_version=v1.0.0"
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+    });
+
+    vitest.it("passes current_version to generic updater", async function () {
+        const mockGeneric = services.genericUpdater as unknown as MockGenericUpdaterService;
+        mockGeneric.result = {
+            status: 200,
+            body: {
+                version: "1.0.0",
+                notes: "Notes",
+                pubDate: "2024-01-01T00:00:00Z",
+                platforms: {}
+            }
+        };
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/api/update/generic/app1?current_version=v1.0.0"
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+    });
+
+    vitest.it("passes current_version to squirrel updater", async function () {
+        const mockSquirrel = services.squirrelUpdater as unknown as MockSquirrelUpdaterService;
+        mockSquirrel.result = {
+            status: 200,
+            body: {
+                url: "http://example.com/setup.exe",
+                name: "Release 1.0.0",
+                notes: "Notes",
+                pub_date: "2024-01-01T00:00:00Z"
+            }
+        };
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/api/update/squirrel/app1?current_version=v1.0.0"
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+    });
+
+    vitest.it("passes current_version to sparkle updater without content type", async function () {
+        const mockSparkle = services.sparkleUpdater as unknown as MockSparkleUpdaterService;
+        mockSparkle.result = {
+            status: 200,
+            body: '<?xml version="1.0"?><rss></rss>'
+        };
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/api/update/sparkle/app1?current_version=v1.0.0"
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
         vitest.expect(response.payload).toContain("<rss>");
     });
 
@@ -709,6 +803,57 @@ vitest.describe("buildApp", function () {
                 })
             )
             .toBe(true);
+        delete process.env.WEBHOOK_SECRET;
+    });
+
+    vitest.it("invalidates app cache when webhook has no release tag", async function () {
+        process.env.WEBHOOK_SECRET = "webhook-secret";
+        const app = await appFactory.buildApp(services);
+        const payload = JSON.stringify({
+            action: "published",
+            repository: { full_name: "owner/app1" }
+        });
+        const signature = "sha256=" + crypto.createHmac("sha256", "webhook-secret").update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.success).toBe(true);
+        const metadataCacheMock = services.metadataCache as unknown as MockMetadataCache;
+        vitest.expect(metadataCacheMock.invalidatedApps).toContain("app1");
+        delete process.env.WEBHOOK_SECRET;
+    });
+
+    vitest.it("accepts github webhook without repository", async function () {
+        process.env.WEBHOOK_SECRET = "webhook-secret";
+        const app = await appFactory.buildApp(services);
+        const payload = JSON.stringify({ action: "published" });
+        const signature = "sha256=" + crypto.createHmac("sha256", "webhook-secret").update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.success).toBe(true);
+        const metadataCacheMock = services.metadataCache as unknown as MockMetadataCache;
+        vitest.expect(metadataCacheMock.invalidatedApps.length).toBe(0);
         delete process.env.WEBHOOK_SECRET;
     });
 
