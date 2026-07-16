@@ -10,6 +10,8 @@
         "build:public": "vite build",
         "typecheck": "tsc -b",
         "dev:public": "vite",
+        "start": "node dist/server/main.js",
+        "prod": "npm run build && npm run start",
         "test": "vitest run",
         "lint": "eslint src tests --ext .ts,.tsx,.js,.jsx",
         "lint:fix": "eslint src tests --ext .ts,.tsx,.js,.jsx --fix",
