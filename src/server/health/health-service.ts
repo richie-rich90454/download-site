@@ -81,8 +81,7 @@ export class DefaultHealthService implements HealthService {
                 thresholdBytes: this.diskSpaceThresholdBytes
             };
         } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.logger.warn("Failed to check disk space", { error: message });
+            this.logger.warn("Failed to check disk space", { error: String(err) });
             return {
                 ok: false,
                 freeBytes: 0,
