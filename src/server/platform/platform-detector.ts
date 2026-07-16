@@ -106,6 +106,9 @@ export class DefaultPlatformDetector implements PlatformDetector {
         }
         score = score + osScore;
         const extScore = this.scoreExtension(name, target.os);
+        if (target.os === "linux" && extScore <= 0) {
+            return 0;
+        }
         score = score + extScore;
         const archScore = this.scoreArch(name, target.arch);
         score = score + archScore;
