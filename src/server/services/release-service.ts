@@ -95,6 +95,9 @@ export class ReleaseService {
         const etag = cached !== undefined ? cached.etag : undefined;
         try {
             const result = await this.provider.getReleaseByTag(app.repo, tag);
+            if (result.data === undefined) {
+                return undefined;
+            }
             if (result.fromCache && cached !== undefined) {
                 this.cache.setRelease(appId, tag, cached.release, etag, this.defaultTtlSeconds);
                 return cached.release;
@@ -159,7 +162,10 @@ export class ReleaseService {
         return result;
     }
 
-    private transformRelease(githubRelease: types.GitHubRelease): types.Release {
+    private transformRelease(githubRelease: types.GitHubRelease | undefined): types.Release {
+        if (githubRelease === undefined) {
+            throw new Error("GitHub release data is undefined");
+        }
         return {
             tag: githubRelease.tag_name,
             name: githubRelease.name,
