@@ -151,6 +151,15 @@ describe("DownloadService", function () {
         );
     });
 
+    it("throws when explicit asset name is not found", async function () {
+        const release = createRelease("v1.0.0");
+        releaseSvc.addRelease(release);
+
+        await expect(service.resolveAsset("app1", { version: "v1.0.0", assetName: "missing.exe" })).rejects.toThrow(
+            "No matching asset found for app app1"
+        );
+    });
+
     it("builds asset URL", function () {
         const url = service.buildAssetUrl("app1", "v1.0.0", "app-windows.exe");
 
@@ -211,5 +220,94 @@ describe("DownloadService", function () {
         expect(result.statusCode).toBe(206);
         expect(result.headers["content-range"]).toBe("bytes 1-3/6");
         expect(result.body).toBe("bcd");
+    });
+
+    it("returns 416 for invalid range format", async function () {
+        const filePath = path.join(tempDir, "test.exe");
+        fs.writeFileSync(filePath, "abcdef");
+
+        const result = await requestServer(filePath, "test.exe", "bytes=invalid");
+
+        expect(result.statusCode).toBe(416);
+    });
+
+    it("returns 416 for out of bounds range", async function () {
+        const filePath = path.join(tempDir, "test.exe");
+        fs.writeFileSync(filePath, "abcdef");
+
+        const result = await requestServer(filePath, "test.exe", "bytes=10-20");
+
+        expect(result.statusCode).toBe(416);
+    });
+
+    it("returns 416 when range start exceeds end", async function () {
+        const filePath = path.join(tempDir, "test.exe");
+        fs.writeFileSync(filePath, "abcdef");
+
+        const result = await requestServer(filePath, "test.exe", "bytes=5-1");
+
+        expect(result.statusCode).toBe(416);
+    });
+
+    it("supports range request with end only", async function () {
+        const filePath = path.join(tempDir, "test.exe");
+        fs.writeFileSync(filePath, "abcdef");
+
+        const result = await requestServer(filePath, "test.exe", "bytes=-3");
+
+        expect(result.statusCode).toBe(206);
+        expect(result.headers["content-range"]).toBe("bytes 0-3/6");
+        expect(result.body).toBe("abcd");
+    });
+
+    it("supports range request with start only", async function () {
+        const filePath = path.join(tempDir, "test.exe");
+        fs.writeFileSync(filePath, "abcdef");
+
+        const result = await requestServer(filePath, "test.exe", "bytes=1-");
+
+        expect(result.statusCode).toBe(206);
+        expect(result.headers["content-range"]).toBe("bytes 1-5/6");
+        expect(result.body).toBe("bcdef");
+    });
+
+    it("detects tar.gz content type", async function () {
+        const filePath = path.join(tempDir, "test.tar.gz");
+        fs.writeFileSync(filePath, "archive");
+
+        const result = await requestServer(filePath, "test.tar.gz");
+
+        expect(result.statusCode).toBe(200);
+        expect(result.headers["content-type"]).toBe("application/gzip");
+    });
+
+    it("detects tar.gz content type from name fallback", async function () {
+        const filePath = path.join(tempDir, "archive.tar.gz.asc");
+        fs.writeFileSync(filePath, "archive");
+
+        const result = await requestServer(filePath, "archive.tar.gz.asc");
+
+        expect(result.statusCode).toBe(200);
+        expect(result.headers["content-type"]).toBe("application/gzip");
+    });
+
+    it("uses default content type for unknown extension", async function () {
+        const filePath = path.join(tempDir, "test.unknown");
+        fs.writeFileSync(filePath, "data");
+
+        const result = await requestServer(filePath, "test.unknown");
+
+        expect(result.statusCode).toBe(200);
+        expect(result.headers["content-type"]).toBe("application/octet-stream");
+    });
+
+    it("uses default content type when there is no extension", async function () {
+        const filePath = path.join(tempDir, "README");
+        fs.writeFileSync(filePath, "data");
+
+        const result = await requestServer(filePath, "README");
+
+        expect(result.statusCode).toBe(200);
+        expect(result.headers["content-type"]).toBe("application/octet-stream");
     });
 });
