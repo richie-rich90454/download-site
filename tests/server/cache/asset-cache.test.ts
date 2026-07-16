@@ -15,6 +15,14 @@ vi.mock("undici", function () {
     };
 });
 
+vi.mock("node:fs", async function () {
+    const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+    return Object.assign({}, actual, {
+        existsSync: vi.fn(actual.existsSync),
+        unlinkSync: vi.fn(actual.unlinkSync)
+    });
+});
+
 function createAsset(name: string, size: number, url: string): types.Asset {
     return {
         name: name,
@@ -288,5 +296,45 @@ describe("DiskAssetCacheService", function () {
         fs.unlinkSync(first.filePath);
 
         await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow();
+    });
+
+    it("cleans up temp file when download fails", async function () {
+        const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce({
+            statusCode: 500,
+            headers: {},
+            body: null
+        } as unknown as Awaited<ReturnType<typeof undici.request>>);
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow();
+
+        const tempFiles = fs.readdirSync(path.join(tempDir, "assets", "app1", "v1.0.0"));
+        expect(
+            tempFiles.every(function (name) {
+                return name.indexOf(".tmp") < 0;
+            })
+        ).toBe(true);
+    });
+
+    it("handles file deletion errors during purge gracefully", async function () {
+        const data = Buffer.from("purge me");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        const existsSpy = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+        const unlinkSpy = vi.spyOn(fs, "unlinkSync").mockImplementation(function () {
+            throw new Error("cannot delete");
+        });
+        try {
+            cache.purge("app1");
+        } finally {
+            existsSpy.mockRestore();
+            unlinkSpy.mockRestore();
+        }
+
+        expect(cache).toBeDefined();
     });
 });
