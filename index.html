@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Richard's Blogs - Application Download</title>
+    </head>
+    <body>
+        <div id="offline-banner" class="offline-banner is-hidden" role="status" aria-live="polite">
+            You are currently offline. Some features may be unavailable.
+        </div>
+        <div class="container">
+            <h1>Richard's Blogs Application Downloads</h1>
+            <div class="subhead">Choose your app &amp; platform</div>
+            <div class="search-bar">
+                <label for="release-search">Search releases</label>
+                <input
+                    id="release-search"
+                    type="search"
+                    placeholder="Filter by version or keywords..."
+                    autocomplete="off"
+                />
+            </div>
+            <div id="app-grid" class="app-grid"></div>
+            <hr />
+            <div class="api-note">
+                Update API:
+                <code>/api/update/randmatqugea</code>
+                and
+                <code>/api/update/desktopcalendartracking</code>
+            </div>
+        </div>
+        <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+        <script type="module" src="/src/public/script.ts"></script>
+    </body>
+</html>
