@@ -7,14 +7,14 @@ SaaS-grade download server with GitHub releases, asset caching, and updater endp
 ## Setup
 
 1. Copy `.env.example` to `.env` and fill in your values:
-   ```sh
-   cp .env.example .env
-   ```
+    ```sh
+    cp .env.example .env
+    ```
 2. Add a valid `GITHUB_TOKEN` and configure the `APPS` array with your repositories.
 3. Install dependencies:
-   ```sh
-   npm install
-   ```
+    ```sh
+    npm install
+    ```
 
 ## Development
 
