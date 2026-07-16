@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as platform from "../../../../src/server/platform/platform-detector.js";
 import * as tauriUpdater from "../../../../src/server/services/updaters/tauri-updater-service.js";
 import * as updaterTypes from "../../../../src/server/services/updaters/updater-types.js";
@@ -94,5 +94,98 @@ describe("TauriUpdaterService", function () {
         const result = await service.getV2Update({ appId: "app1", currentVersion: "v1.0.0" });
 
         expect(result.status).toBe(404);
+    });
+
+    it("returns v1 manifest when target is omitted", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app-linux-x64.tar.gz"),
+                helpers.createAsset("app-linux-x64.tar.gz.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app-linux-x64.tar.gz", "sig-content");
+
+        const result = await service.getV1Update({ appId: "app1", currentVersion: "v1.0.0" });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.version).toBe("1.1.0");
+        expect(manifest.signature).toBe("sig-content");
+    });
+
+    it("returns v1 manifest for unknown target os using linux fallback", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app-linux-x64.tar.gz"),
+                helpers.createAsset("app-linux-x64.tar.gz.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app-linux-x64.tar.gz", "sig-content");
+
+        const result = await service.getV1Update({ appId: "app1", currentVersion: "v1.0.0", target: "unknown-x64" });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app-linux-x64.tar.gz") >= 0).toBe(true);
+    });
+
+    it("falls back to x64 arch when target arch is unknown", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app-windows-x64.exe"),
+                helpers.createAsset("app-windows-x64.exe.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app-windows-x64.exe", "sig-content");
+
+        const result = await service.getV1Update({
+            appId: "app1",
+            currentVersion: "v1.0.0",
+            target: "windows-unknown"
+        });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app-windows-x64.exe") >= 0).toBe(true);
+    });
+
+    it("returns v1 manifest with empty signature when no signature asset exists", async function () {
+        releaseSvc.setRelease(helpers.createRelease("v1.1.0", [helpers.createAsset("app-windows-x64.exe")]));
+
+        const result = await service.getV1Update({ appId: "app1", currentVersion: "v1.0.0", target: "windows-x86_64" });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.signature).toBe("");
+    });
+
+    it("returns 400 for v1 when target os is undefined", async function () {
+        const parseSpy = vi
+            .spyOn(
+                service as unknown as { parseTauriTarget: (target: string) => { os: undefined; arch: string } },
+                "parseTauriTarget"
+            )
+            .mockReturnValue({ os: undefined, arch: "x64" });
+        releaseSvc.setRelease(helpers.createRelease("v1.1.0", [helpers.createAsset("app-windows-x64.exe")]));
+
+        const result = await service.getV1Update({ appId: "app1", currentVersion: "v1.0.0", target: "windows-x86_64" });
+
+        expect(result.status).toBe(400);
+        parseSpy.mockRestore();
+    });
+
+    it("returns 404 for v2 when no release found", async function () {
+        const result = await service.getV2Update({ appId: "app1", currentVersion: "v1.0.0" });
+
+        expect(result.status).toBe(404);
+    });
+
+    it("returns 204 for v2 when up to date", async function () {
+        releaseSvc.setRelease(helpers.createRelease("v1.0.0", [helpers.createAsset("app-windows-x64.exe")]));
+
+        const result = await service.getV2Update({ appId: "app1", currentVersion: "v1.0.0" });
+
+        expect(result.status).toBe(204);
+        expect(result.body).toBeUndefined();
     });
 });

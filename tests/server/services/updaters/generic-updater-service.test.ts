@@ -69,4 +69,14 @@ describe("GenericUpdaterService", function () {
 
         expect(result.status).toBe(404);
     });
+
+    it("returns manifest with empty signature when signature asset is missing", async function () {
+        releaseSvc.setRelease(helpers.createRelease("v1.1.0", [helpers.createAsset("app-windows-x86.exe")]));
+
+        const result = await service.getUpdate({ appId: "app1", currentVersion: "v1.0.0" });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.GenericUpdateManifest;
+        expect(manifest.platforms["windows_x86"].signature).toBe("");
+    });
 });
