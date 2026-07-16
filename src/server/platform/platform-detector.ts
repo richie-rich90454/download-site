@@ -11,10 +11,7 @@ export interface PlatformDetector {
 export class DefaultPlatformDetector implements PlatformDetector {
     detectTarget(userAgent?: string, platformHint?: string): types.Target {
         if (platformHint !== undefined && platformHint.length > 0) {
-            const parsed = this.parsePlatformHint(platformHint);
-            if (parsed.os !== undefined) {
-                return parsed;
-            }
+            return this.parsePlatformHint(platformHint);
         }
         if (userAgent !== undefined && userAgent.length > 0) {
             const parser = new uaParser.UAParser(userAgent);
