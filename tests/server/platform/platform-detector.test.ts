@@ -36,6 +36,10 @@ describe("DefaultPlatformDetector", function () {
         expect(detector.normalizeOs("Solaris")).toBeUndefined();
     });
 
+    it("returns undefined for unknown arch", function () {
+        expect(detector.normalizeArch("riscv")).toBeUndefined();
+    });
+
     it("normalizes arm64 architectures", function () {
         expect(detector.normalizeArch("arm64")).toBe("arm64");
         expect(detector.normalizeArch("aarch64")).toBe("arm64");
@@ -51,6 +55,7 @@ describe("DefaultPlatformDetector", function () {
         expect(detector.normalizeArch("x86")).toBe("x86");
         expect(detector.normalizeArch("i386")).toBe("x86");
         expect(detector.normalizeArch("i686")).toBe("x86");
+        expect(detector.normalizeArch("win32")).toBe("x86");
     });
 
     it("detects target from User-Agent", function () {
@@ -69,6 +74,13 @@ describe("DefaultPlatformDetector", function () {
 
     it("defaults to linux x64 when nothing matches", function () {
         const target = detector.detectTarget("", "");
+
+        expect(target.os).toBe("linux");
+        expect(target.arch).toBe("x64");
+    });
+
+    it("defaults to linux when user agent OS is unrecognized", function () {
+        const target = detector.detectTarget("Mozilla/5.0", "");
 
         expect(target.os).toBe("linux");
         expect(target.arch).toBe("x64");
@@ -224,5 +236,68 @@ describe("DefaultPlatformDetector", function () {
 
         expect(selected).toBeDefined();
         expect(selected.name).toBe("app-windows-x86.exe");
+    });
+
+    it("returns zero score for linux asset with unmatched extension", function () {
+        const assets = [createAsset("app-linux.bin")];
+        const target: types.Target = { os: "linux", arch: "x64" };
+
+        const selected = detector.selectAsset(assets, target);
+
+        expect(selected).toBeUndefined();
+    });
+
+    it("defaults to x64 when user agent architecture is unrecognized", function () {
+        const target = detector.detectTarget("Mozilla/5.0 (X11; Linux x128)");
+
+        expect(target.os).toBe("linux");
+        expect(target.arch).toBe("x64");
+    });
+
+    it("uses x64 arch when platform hint omits arch", function () {
+        const target = detector.detectTarget("", "windows");
+
+        expect(target.os).toBe("windows");
+        expect(target.arch).toBe("x64");
+    });
+
+    it("scores windows msi extension", function () {
+        const assets = [createAsset("app-windows.msi")];
+        const target: types.Target = { os: "windows", arch: "x64" };
+
+        const selected = detector.selectAsset(assets, target);
+
+        expect(selected).toBeDefined();
+        expect(selected.name).toBe("app-windows.msi");
+    });
+
+    it("scores windows zip extension", function () {
+        const assets = [createAsset("app-windows.zip")];
+        const target: types.Target = { os: "windows", arch: "x64" };
+
+        const selected = detector.selectAsset(assets, target);
+
+        expect(selected).toBeDefined();
+        expect(selected.name).toBe("app-windows.zip");
+    });
+
+    it("scores windows asset with unmatched extension by os only", function () {
+        const assets = [createAsset("app-windows.bin")];
+        const target: types.Target = { os: "windows", arch: "x64" };
+
+        const selected = detector.selectAsset(assets, target);
+
+        expect(selected).toBeDefined();
+        expect(selected.name).toBe("app-windows.bin");
+    });
+
+    it("scores darwin asset with unmatched extension by os only", function () {
+        const assets = [createAsset("app-macos.bin")];
+        const target: types.Target = { os: "darwin", arch: "x64" };
+
+        const selected = detector.selectAsset(assets, target);
+
+        expect(selected).toBeDefined();
+        expect(selected.name).toBe("app-macos.bin");
     });
 });
