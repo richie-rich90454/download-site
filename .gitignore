@@ -146,3 +146,15 @@ vite.config.ts.timestamp-*
 
 # Cached installer directories
 /cache/
+
+# Docker files (not used in this project)
+/Dockerfile
+/docker-compose.yml
+/.dockerignore
+
+# Coverage debug artifacts
+cov-*.txt
+coverage-*.txt
+bisect-cov.txt
+real-cov.txt
+diag-cov*.txt
