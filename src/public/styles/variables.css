@@ -1,0 +1,77 @@
+:root {
+    --bg: #f4f6f9;
+    --panel: rgba(255, 255, 255, 0.78);
+    --panel-solid: #ffffff;
+    --text: #1a1f24;
+    --text-muted: #4b5563;
+    --primary: #1e3a55;
+    --secondary: #b91c1c;
+    --accent: #005a9e;
+    --border: rgba(0, 0, 0, 0.12);
+    --border-strong: rgba(0, 0, 0, 0.25);
+    --select-bg: linear-gradient(to bottom, #ffffff, #f1f3f6);
+    --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    --btn-bg: linear-gradient(to bottom, #fdfdfd, #e9edf2);
+    --btn-hover-bg: linear-gradient(to bottom, #ffffff, #dde3ea);
+    --btn-text: var(--text);
+    --btn-border: var(--border);
+    --btn-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    --btn-primary-bg: linear-gradient(to bottom, #1e5a8e, #164870);
+    --btn-primary-hover-bg: linear-gradient(to bottom, #2570ab, #1a588a);
+    --btn-primary-text: #ffffff;
+    --btn-platform-bg: linear-gradient(to bottom, #e7f3ec, #cfe6da);
+    --btn-platform-hover-bg: linear-gradient(to bottom, #c8e6d6, #a9d5be);
+    --btn-platform-text: #0f5a25;
+    --btn-platform-border: #a7d3bb;
+    --card-sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.2), transparent 35%);
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.18);
+    --blur: blur(14px);
+    --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0e1116;
+        --panel: rgba(26, 32, 40, 0.76);
+        --panel-solid: #1b222c;
+        --text: #e8edf2;
+        --text-muted: #aab4bf;
+        --primary: #8fbbe0;
+        --secondary: #f28a8a;
+        --accent: #5fb8ff;
+        --border: rgba(255, 255, 255, 0.14);
+        --border-strong: rgba(255, 255, 255, 0.24);
+        --select-bg: linear-gradient(to bottom, #202733, #171c24);
+        --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23eee' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+        --btn-bg: linear-gradient(to bottom, #2c313a, #1e232b);
+        --btn-hover-bg: linear-gradient(to bottom, #363c46, #262c35);
+        --btn-text: #e0e0e0;
+        --btn-border: #3a4049;
+        --btn-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        --btn-primary-bg: linear-gradient(to bottom, #2d7db8, #216092);
+        --btn-primary-hover-bg: linear-gradient(to bottom, #3693d4, #2874aa);
+        --btn-primary-text: #ffffff;
+        --btn-platform-bg: linear-gradient(to bottom, #1b4a2b, #123a20);
+        --btn-platform-hover-bg: linear-gradient(to bottom, #225a34, #164a26);
+        --btn-platform-text: #b0e0b0;
+        --btn-platform-border: #2a5a3a;
+        --card-sheen: linear-gradient(to bottom, rgba(0, 0, 0, 0.2), transparent 35%);
+    }
+}
+
+@media (prefers-contrast: more) {
+    :root {
+        --panel: var(--panel-solid);
+        --border: currentColor;
+        --border-strong: currentColor;
+        --shadow-sm: none;
+        --shadow-md: none;
+        --blur: none;
+        --text: CanvasText;
+        --bg: Canvas;
+    }
+}
