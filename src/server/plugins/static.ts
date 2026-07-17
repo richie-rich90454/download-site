@@ -27,6 +27,6 @@ export async function registerStatic(app: FastifyInstance): Promise<void> {
     const publicDir = resolvePublicDir();
     await app.register(fastifyStatic.default, {
         root: publicDir,
-        wildcard: false
+        wildcard: true
     });
 }

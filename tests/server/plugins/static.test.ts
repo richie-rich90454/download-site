@@ -59,4 +59,29 @@ describe("static plugin", function () {
         const response = await app.inject({ method: "GET", url: "/index.html" });
         expect(response.statusCode).toBe(200);
     });
+
+    it("serves assets with correct content type", async function () {
+        const publicDir = staticPlugin.getPublicDir();
+        const assetsDir = path.resolve(publicDir, "assets");
+        if (!fs.existsSync(assetsDir)) {
+            fs.mkdirSync(assetsDir, { recursive: true });
+        }
+        const assetPath = path.resolve(assetsDir, "test-asset.js");
+        const hadAsset = fs.existsSync(assetPath);
+        fs.writeFileSync(assetPath, "console.log('test');");
+
+        const app = Fastify({ logger: false });
+        await staticPlugin.registerStatic(app);
+
+        try {
+            const response = await app.inject({ method: "GET", url: "/assets/test-asset.js" });
+            expect(response.statusCode).toBe(200);
+            expect(response.headers["content-type"]).toContain("javascript");
+            expect(response.body).toBe("console.log('test');");
+        } finally {
+            if (!hadAsset) {
+                fs.unlinkSync(assetPath);
+            }
+        }
+    });
 });
