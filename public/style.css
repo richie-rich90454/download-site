@@ -690,6 +690,10 @@ hr {
     display: block !important;
 }
 
+.modal-backdrop.is-visible {
+    display: flex !important;
+}
+
 @keyframes spinner {
     to {
         transform: translateY(-50%) rotate(360deg);
