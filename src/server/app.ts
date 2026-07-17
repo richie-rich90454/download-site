@@ -10,6 +10,7 @@ import * as requestLogging from "./plugins/request-logging.js";
 import * as swagger from "./plugins/swagger.js";
 import * as staticFiles from "./plugins/static.js";
 import * as healthRoutes from "./routes/health-routes.js";
+import * as appRoutes from "./routes/app-routes.js";
 import * as releaseRoutes from "./routes/release-routes.js";
 import * as updateRoutes from "./routes/update-routes.js";
 import * as downloadRoutes from "./routes/download-routes.js";
@@ -40,6 +41,7 @@ export async function buildApp(services: Services): Promise<FastifyInstance> {
     await staticFiles.registerStatic(app);
 
     await healthRoutes.registerHealthRoutes(app);
+    await appRoutes.registerAppRoutes(app);
     await releaseRoutes.registerReleaseRoutes(app);
     await updateRoutes.registerUpdateRoutes(app);
     await downloadRoutes.registerDownloadRoutes(app);

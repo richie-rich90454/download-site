@@ -406,6 +406,18 @@ vitest.describe("buildApp", function () {
         vitest.expect(response.statusCode).toBe(200);
     });
 
+    vitest.it("lists configured apps", async function () {
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({ method: "GET", url: "/api/apps" });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.apps.length).toBe(2);
+        vitest.expect(body.apps[0].id).toBe("app1");
+        vitest.expect(body.apps[0].name).toBe("App One");
+    });
+
     vitest.it("lists releases", async function () {
         const release = createRelease("v1.0.0");
         const mockRelease = services.release as unknown as MockReleaseService;
