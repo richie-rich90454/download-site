@@ -264,21 +264,17 @@ export class DiskAssetCacheService implements AssetCacheService {
             controller.abort();
         }, 300000);
         try {
-            const response = await undici.request(url, {
-                method: "GET",
-                signal: controller.signal
-            });
+            const response = await this.fetchAsset(url, controller.signal);
             if (response.statusCode < 200 || response.statusCode >= 300) {
                 throw new Error("Asset download failed with status " + response.statusCode);
             }
             const hash = crypto.createHash("sha256");
             const fileStream = fs.createWriteStream(tempPath);
-            const body = response.body;
+            const body = response.body as AsyncIterable<Buffer> | null;
             if (body === null) {
                 throw new Error("Asset download response body is empty");
             }
-            const reader = body as AsyncIterable<Buffer>;
-            for await (const chunk of reader) {
+            for await (const chunk of body) {
                 const buffer = chunk;
                 fileStream.write(buffer);
                 hash.update(buffer);
@@ -324,6 +320,28 @@ export class DiskAssetCacheService implements AssetCacheService {
                 fs.unlinkSync(tempPath);
             }
         }
+    }
+
+    private async fetchAsset(
+        url: string,
+        signal: AbortSignal,
+        redirects?: number
+    ): Promise<Awaited<ReturnType<typeof undici.request>>> {
+        const redirectCount = redirects === undefined ? 0 : redirects;
+        const response = await undici.request(url, {
+            method: "GET",
+            signal: signal
+        });
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location !== undefined) {
+            if (redirectCount >= 5) {
+                throw new Error("Asset download redirect limit exceeded");
+            }
+            const location = Array.isArray(response.headers.location)
+                ? response.headers.location[0]
+                : response.headers.location;
+            return this.fetchAsset(location, signal, redirectCount + 1);
+        }
+        return response;
     }
 
     private async makeRoom(neededSize: number): Promise<void> {
