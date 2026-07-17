@@ -7,6 +7,15 @@ export class PinoLogger implements logger.Logger {
     constructor(level: string) {
         const options: pino.LoggerOptions = {
             level: level,
+            transport: {
+                target: "pino-pretty",
+                options: {
+                    colorize: true,
+                    singleLine: true,
+                    translateTime: "SYS:standard",
+                    ignore: "pid,hostname"
+                }
+            },
             redact: {
                 paths: [
                     "req.headers.authorization",
