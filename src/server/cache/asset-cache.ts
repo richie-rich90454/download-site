@@ -268,25 +268,35 @@ export class DiskAssetCacheService implements AssetCacheService {
             if (response.statusCode < 200 || response.statusCode >= 300) {
                 throw new Error("Asset download failed with status " + response.statusCode);
             }
-            const hash = crypto.createHash("sha256");
-            const fileStream = fs.createWriteStream(tempPath);
             const body = response.body as AsyncIterable<Buffer> | null;
             if (body === null) {
                 throw new Error("Asset download response body is empty");
             }
-            for await (const chunk of body) {
-                const buffer = chunk;
-                fileStream.write(buffer);
-                hash.update(buffer);
-            }
-            await new Promise<void>(function (resolve, reject) {
-                fileStream.end(function () {
-                    resolve();
-                });
-                fileStream.on("error", function (err) {
-                    reject(err);
-                });
+            const hash = crypto.createHash("sha256");
+            const fileStream = fs.createWriteStream(tempPath);
+            let streamError: Error | undefined;
+            fileStream.on("error", function (err) {
+                streamError = err;
             });
+            try {
+                for await (const chunk of body) {
+                    const buffer = chunk;
+                    fileStream.write(buffer);
+                    hash.update(buffer);
+                }
+                await new Promise<void>(function (resolve, reject) {
+                    fileStream.end(function () {
+                        if (streamError !== undefined) {
+                            reject(streamError);
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+            } catch (err) {
+                fileStream.destroy();
+                throw err;
+            }
             const checksum = hash.digest("hex");
             await this.makeRoom(asset.size);
             fs.renameSync(tempPath, finalPath);
@@ -317,7 +327,11 @@ export class DiskAssetCacheService implements AssetCacheService {
         } finally {
             clearTimeout(timeout);
             if (fs.existsSync(tempPath)) {
-                fs.unlinkSync(tempPath);
+                try {
+                    fs.unlinkSync(tempPath);
+                } catch {
+                    // ignore cleanup errors
+                }
             }
         }
     }
