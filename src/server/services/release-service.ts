@@ -92,9 +92,36 @@ export class ReleaseService {
             this.logger.debug("Release by tag cache hit", { app: appId, tag: tag });
             return cached.release;
         }
+        return this.fetchReleaseByTag(appId, app.repo, tag, cached);
+    }
+
+    async refreshReleases(appId: string, filters?: ReleaseFilters): Promise<types.Release[]> {
+        const app = this.findApp(appId);
+        this.cache.invalidateApp(appId);
+        const page = filters !== undefined && filters.page !== undefined ? filters.page : 1;
+        const perPage = filters !== undefined && filters.perPage !== undefined ? filters.perPage : 100;
+        const result = await this.provider.listReleases(app.repo, { page: page, perPage: perPage });
+        const releases = this.transformReleases(result.data);
+        this.cache.setReleases(appId, releases, result.etag, this.defaultTtlSeconds);
+        this.logger.info("Pulled releases from GitHub refresh", { app: appId, count: releases.length });
+        return releases;
+    }
+
+    async refreshReleaseByTag(appId: string, tag: string): Promise<types.Release | undefined> {
+        const app = this.findApp(appId);
+        this.cache.invalidateTag(appId, tag);
+        return this.fetchReleaseByTag(appId, app.repo, tag, undefined);
+    }
+
+    private async fetchReleaseByTag(
+        appId: string,
+        repo: string,
+        tag: string,
+        cached: metadataCache.ReleaseCacheEntry | undefined
+    ): Promise<types.Release | undefined> {
         const etag = cached !== undefined ? cached.etag : undefined;
         try {
-            const result = await this.provider.getReleaseByTag(app.repo, tag);
+            const result = await this.provider.getReleaseByTag(repo, tag);
             if (result.data === undefined) {
                 return undefined;
             }

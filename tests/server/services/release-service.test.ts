@@ -485,4 +485,43 @@ describe("ReleaseService", function () {
         expect(release).toBeDefined();
         expect(release.notes).toBe("");
     });
+
+    it("refreshReleases invalidates cache and fetches from provider", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        await service.listReleases("app1", {});
+        provider.setReleases([createGitHubRelease("v2.0.0", "2024-02-01T00:00:00Z")]);
+
+        const releases = await service.refreshReleases("app1");
+
+        expect(releases.length).toBe(1);
+        expect(releases[0].tag).toBe("v2.0.0");
+    });
+
+    it("refreshReleaseByTag invalidates tag and fetches from provider", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        await service.getReleaseByTag("app1", "v1.0.0");
+        provider.setReleases([
+            {
+                tag_name: "v1.0.0",
+                name: "Release v1.0.0 patched",
+                body: "Patched notes",
+                published_at: "2024-01-01T00:00:00Z",
+                prerelease: false,
+                assets: [
+                    {
+                        name: "app-windows.exe",
+                        size: 100,
+                        content_type: "application/octet-stream",
+                        url: "http://example.com/asset",
+                        browser_download_url: "http://example.com/asset"
+                    }
+                ]
+            }
+        ]);
+
+        const release = await service.refreshReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.name).toBe("Release v1.0.0 patched");
+    });
 });
