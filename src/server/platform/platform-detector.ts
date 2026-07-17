@@ -97,7 +97,8 @@ export class DefaultPlatformDetector implements PlatformDetector {
     private scoreAsset(asset: types.Asset, target: types.Target): number {
         const name = asset.name.toLowerCase();
         let score = 0;
-        const osScore = this.scoreOs(name, target.os);
+        const inferredOs = this.inferOsFromExtension(name);
+        const osScore = this.scoreOs(name, target.os, inferredOs);
         if (osScore <= 0) {
             return 0;
         }
@@ -115,7 +116,23 @@ export class DefaultPlatformDetector implements PlatformDetector {
         return score;
     }
 
-    private scoreOs(name: string, os: types.Platform): number {
+    private inferOsFromExtension(name: string): types.Platform | undefined {
+        if (name.endsWith(".exe") || name.endsWith(".msi")) {
+            return "windows";
+        }
+        if (name.endsWith(".dmg") || name.endsWith(".pkg")) {
+            return "darwin";
+        }
+        if (name.endsWith(".deb") || name.endsWith(".rpm") || name.endsWith(".appimage")) {
+            return "linux";
+        }
+        return undefined;
+    }
+
+    private scoreOs(name: string, os: types.Platform, inferredOs?: types.Platform): number {
+        if (inferredOs === os) {
+            return 20;
+        }
         if (os === "windows") {
             if (name.indexOf("windows") >= 0 || name.indexOf("win") >= 0) {
                 return 20;
