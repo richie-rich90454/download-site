@@ -82,6 +82,8 @@ export function createStore(): Store {
             return;
         }
         app.releases = releases;
+        app.status = "idle";
+        app.errorMessage = "";
         if (releases.length > 0 && app.selectedVersion === "") {
             app.selectedVersion = releases[0].tag;
         }

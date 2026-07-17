@@ -48,6 +48,8 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
 
     store.registerApp(appName, displayName);
 
+    let lastSnapshot = "";
+
     async function loadReleases(): Promise<void> {
         store.setLoading(appName);
         try {
@@ -65,7 +67,6 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
     }
 
     async function loadUpdate(version: string): Promise<void> {
-        store.setLoading(appName);
         try {
             const update = await fetchUpdate(appName, version);
             store.setUpdate(appName, update);
@@ -107,31 +108,80 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
         if (appState === null) {
             return;
         }
-        content.innerHTML = "";
+        let view = "content";
         if (appState.status === "loading" && appState.releases.length === 0) {
-            content.appendChild(createLoadingSkeleton());
+            view = "skeleton";
+        } else if (appState.status === "error") {
+            view = "error";
+        } else if (appState.releases.length === 0) {
+            view = "empty";
+        }
+        const snapshot = JSON.stringify({
+            filter: state.filter,
+            view: view,
+            releases: appState.releases,
+            selectedVersion: appState.selectedVersion,
+            updateData: appState.updateData
+        });
+        if (snapshot === lastSnapshot) {
             return;
         }
-        if (appState.status === "error") {
-            content.appendChild(
-                createErrorBoundary({
-                    message: appState.errorMessage,
-                    onRetry: onRetry
-                })
-            );
+        let previousView = "";
+        if (lastSnapshot.length > 0) {
+            const previous = JSON.parse(lastSnapshot) as { view?: string };
+            previousView = previous.view !== undefined ? previous.view : "";
+        }
+        lastSnapshot = snapshot;
+        if (view !== previousView) {
+            content.innerHTML = "";
+            if (view === "skeleton") {
+                content.appendChild(createLoadingSkeleton());
+                return;
+            }
+            if (view === "error") {
+                content.appendChild(
+                    createErrorBoundary({
+                        message: appState.errorMessage,
+                        onRetry: onRetry
+                    })
+                );
+                return;
+            }
+            if (view === "empty") {
+                const empty = document.createElement("p");
+                empty.textContent = "No releases available.";
+                content.appendChild(empty);
+                return;
+            }
+            content.appendChild(createVersionSelector(appState.releases, appState.selectedVersion));
+            content.appendChild(createActionButtons(appState));
+            content.appendChild(createMetaPanel(appState));
+            content.appendChild(createCopyPanel(appState));
+            content.appendChild(createFilteredList(appState, state.filter));
             return;
         }
-        if (appState.releases.length === 0) {
-            const empty = document.createElement("p");
-            empty.textContent = "No releases available.";
-            content.appendChild(empty);
-            return;
+        if (view === "content") {
+            const select = content.querySelector("select");
+            if (select !== null && select.value !== appState.selectedVersion) {
+                select.value = appState.selectedVersion;
+            }
+            const actionButtons = content.querySelector(".button-group");
+            if (actionButtons !== null) {
+                actionButtons.replaceWith(createActionButtons(appState));
+            }
+            const metaPanel = content.querySelector(".meta-panel");
+            if (metaPanel !== null) {
+                metaPanel.replaceWith(createMetaPanel(appState));
+            }
+            const copyPanel = content.querySelector(".copy-panel");
+            if (copyPanel !== null) {
+                copyPanel.replaceWith(createCopyPanel(appState));
+            }
+            const releaseListSection = content.querySelector(".release-list-section");
+            if (releaseListSection !== null) {
+                releaseListSection.replaceWith(createFilteredList(appState, state.filter));
+            }
         }
-        content.appendChild(createVersionSelector(appState.releases, appState.selectedVersion));
-        content.appendChild(createActionButtons(appState));
-        content.appendChild(createMetaPanel(appState));
-        content.appendChild(createCopyPanel(appState));
-        content.appendChild(createFilteredList(appState, state.filter));
     }
 
     function createVersionSelector(releases: PublicRelease[], selectedVersion: string): HTMLElement {
@@ -298,7 +348,9 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
     }
 
     card.addEventListener("focusin", function onFocusIn(): void {
-        store.setSelectedApp(appName);
+        if (store.getState().selectedAppName !== appName) {
+            store.setSelectedApp(appName);
+        }
     });
 
     store.subscribe(function onStoreChange(): void {
@@ -306,7 +358,6 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
     });
 
     render();
-    void loadReleases();
 
     const appCard: AppCard = {
         element: card,
