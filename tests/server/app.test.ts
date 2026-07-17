@@ -111,7 +111,20 @@ class MockAssetCache implements assetCache.AssetCacheService {
     purgeCalls: Array<{ app?: string; version?: string; assetName?: string }> = [];
 
     async getAssetPath(): Promise<assetCache.AssetCacheResult> {
-        throw new Error("Not implemented");
+        return {
+            filePath: "/cache/asset.exe",
+            cached: false,
+            entry: {
+                app: "app1",
+                version: "v1.0.0",
+                assetName: "app-windows.exe",
+                filePath: "/cache/asset.exe",
+                size: 100,
+                checksum: "abc",
+                lastAccessedAt: Date.now(),
+                createdAt: Date.now()
+            }
+        };
     }
 
     purge(app?: string, version?: string, assetName?: string): void {
@@ -161,6 +174,14 @@ class MockReleaseService {
 
     async warmCache(): Promise<void> {
         this.warmCacheCalled = true;
+    }
+
+    async refreshReleases(): Promise<types.Release[]> {
+        return this.releases;
+    }
+
+    async refreshReleaseByTag(_appId: string, tag: string): Promise<types.Release | undefined> {
+        return this.getReleaseByTag(_appId, tag);
     }
 }
 
@@ -712,6 +733,70 @@ vitest.describe("buildApp", function () {
             .expect(
                 metadataCacheMock.invalidatedTags.some(function (item) {
                     return item.app === "app1" && item.tag === "v1.0.0";
+                })
+            )
+            .toBe(true);
+        delete process.env.ADMIN_API_KEY;
+    });
+
+    vitest.it("downloads a previous version by version query", async function () {
+        const filePath = path.join(tempDir, "app-windows.exe");
+        fs.writeFileSync(filePath, "previous-binary");
+        const mockDownload = services.download as unknown as MockDownloadService;
+        mockDownload.registerFile("app1", "v0.9.0", "app-windows.exe", filePath);
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/download/app1?version=v0.9.0&asset=app-windows.exe"
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        vitest.expect(response.payload).toBe("previous-binary");
+    });
+
+    vitest.it("refreshes metadata cache for an app", async function () {
+        process.env.ADMIN_API_KEY = "secret-admin-key";
+        const release = createRelease("v1.0.0");
+        const mockRelease = services.release as unknown as MockReleaseService;
+        mockRelease.setReleases([release]);
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/admin/cache/refresh",
+            headers: { "x-admin-api-key": "secret-admin-key" },
+            payload: { app: "app1" }
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.success).toBe(true);
+        delete process.env.ADMIN_API_KEY;
+    });
+
+    vitest.it("redownloads a cached asset", async function () {
+        process.env.ADMIN_API_KEY = "secret-admin-key";
+        const release = createRelease("v1.0.0");
+        const mockRelease = services.release as unknown as MockReleaseService;
+        mockRelease.setReleases([release]);
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/admin/assets/redownload",
+            headers: { "x-admin-api-key": "secret-admin-key" },
+            payload: { app: "app1", version: "v1.0.0", asset: "app-windows.exe" }
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.success).toBe(true);
+        const assetCacheMock = services.assetCache as unknown as MockAssetCache;
+        vitest
+            .expect(
+                assetCacheMock.purgeCalls.some(function (item) {
+                    return item.app === "app1" && item.version === "v1.0.0" && item.assetName === "app-windows.exe";
                 })
             )
             .toBe(true);
