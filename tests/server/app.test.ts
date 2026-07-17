@@ -200,7 +200,12 @@ class MockDownloadService {
         return { filePath: filePath, asset: asset, release: release };
     }
 
-    serveFile(filePath: string, assetName: string, res: http.ServerResponse, rangeHeader?: string): void {
+    serveFile(
+        filePath: string,
+        assetName: string,
+        reply: http.ServerResponse | { raw: http.ServerResponse },
+        rangeHeader?: string
+    ): void {
         const content = fs.readFileSync(filePath);
         const totalSize = content.length;
         let start = 0;
@@ -218,6 +223,7 @@ class MockDownloadService {
             }
         }
         const slice = content.subarray(start, end + 1);
+        const res = "raw" in reply ? reply.raw : reply;
         res.statusCode = status;
         res.setHeader("Content-Type", "application/octet-stream");
         res.setHeader("Content-Disposition", 'attachment; filename="' + assetName + '"');

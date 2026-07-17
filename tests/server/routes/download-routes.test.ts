@@ -98,7 +98,7 @@ vitest.describe("registerDownloadRoutes", function () {
         });
         vitest
             .expect(downloadService.serveFile)
-            .toHaveBeenCalledWith("/tmp/app.exe", "app.exe", undefined, "bytes=0-1");
+            .toHaveBeenCalledWith("/tmp/app.exe", "app.exe", replyResult.reply, "bytes=0-1");
     });
 
     vitest.it("returns 404 when resolveAsset throws a non-Error value", async function () {

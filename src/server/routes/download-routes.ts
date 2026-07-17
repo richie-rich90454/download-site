@@ -49,7 +49,7 @@ export async function registerDownloadRoutes(app: FastifyInstance): Promise<void
                     platformHint: query.platform
                 });
                 const range = Array.isArray(rangeHeader) ? rangeHeader[0] : rangeHeader;
-                services.download.serveFile(result.filePath, result.asset.name, reply.raw, range);
+                services.download.serveFile(result.filePath, result.asset.name, reply, range);
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 services.logger.warn("Download failed", { app: appId, error: message });

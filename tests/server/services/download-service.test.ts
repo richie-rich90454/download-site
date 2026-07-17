@@ -310,4 +310,23 @@ describe("DownloadService", function () {
         expect(result.statusCode).toBe(200);
         expect(result.headers["content-type"]).toBe("application/octet-stream");
     });
+
+    it("calls hijack when serving through Fastify reply", function () {
+        const filePath = path.join(tempDir, "fastify.exe");
+        fs.writeFileSync(filePath, "hello-fastify");
+        const raw = new http.ServerResponse({ method: "GET", url: "/" } as http.IncomingMessage);
+        let hijackCalled = false;
+        const reply = {
+            hijack: function () {
+                hijackCalled = true;
+            },
+            raw: raw
+        };
+
+        service.serveFile(filePath, "fastify.exe", reply as unknown as import("fastify").FastifyReply);
+
+        expect(hijackCalled).toBe(true);
+        expect(raw.statusCode).toBe(200);
+        expect(raw.getHeader("Content-Disposition")).toBe('attachment; filename="fastify.exe"');
+    });
 });

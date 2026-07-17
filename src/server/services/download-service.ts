@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
+import type { FastifyReply } from "fastify";
 import * as path from "node:path";
 import * as types from "../../shared/types.js";
 import * as assetCache from "../cache/asset-cache.js";
@@ -7,6 +8,12 @@ import * as platform from "../platform/platform-detector.js";
 import * as release from "./release-service.js";
 import * as metrics from "../telemetry/metrics.js";
 import * as logger from "../logging/logger.js";
+
+type ReplyLike = FastifyReply | http.ServerResponse;
+
+function isFastifyReply(reply: ReplyLike): reply is FastifyReply {
+    return "hijack" in reply && typeof reply.hijack === "function";
+}
 
 export interface DownloadResult {
     filePath: string;
@@ -76,11 +83,15 @@ export class DownloadService {
         return { filePath: cacheResult.filePath, asset: asset, release: releaseObj };
     }
 
-    serveFile(filePath: string, assetName: string, res: http.ServerResponse, rangeHeader?: string): void {
+    serveFile(filePath: string, assetName: string, reply: ReplyLike, rangeHeader?: string): void {
         const stat = fs.statSync(filePath);
         const totalSize = stat.size;
         const contentType = this.getContentType(assetName);
         const safeName = this.safeFilename(assetName);
+        if (isFastifyReply(reply)) {
+            reply.hijack();
+        }
+        const res = isFastifyReply(reply) ? reply.raw : reply;
         const headers: Record<string, string> = {
             "Content-Type": contentType,
             "Content-Disposition": 'attachment; filename="' + safeName + '"',
@@ -119,6 +130,12 @@ export class DownloadService {
         });
         stream.on("end", function () {
             self.logger.info("File served", { path: filePath, bytes: bytesSent });
+        });
+        stream.on("error", function (err) {
+            self.logger.error("File stream error", { path: filePath, error: err.message });
+            if (!res.writableEnded) {
+                res.destroy();
+            }
         });
         stream.pipe(res);
     }
