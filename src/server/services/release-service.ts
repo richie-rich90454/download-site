@@ -57,7 +57,7 @@ export class ReleaseService {
         }
         const releases = this.transformReleases(result.data);
         this.cache.setReleases(appId, releases, result.etag, this.defaultTtlSeconds);
-        this.logger.info("Release list refreshed", { app: appId, count: releases.length });
+        this.logger.info("Pulled releases from GitHub", { app: appId, count: releases.length });
         if (!includePrerelease) {
             return this.filterPrereleases(releases);
         }
@@ -104,6 +104,7 @@ export class ReleaseService {
             }
             const release = this.transformRelease(result.data);
             this.cache.setRelease(appId, tag, release, result.etag, this.defaultTtlSeconds);
+            this.logger.info("Pulled release from GitHub", { app: appId, tag: tag });
             return release;
         } catch (err) {
             if (cached !== undefined) {
@@ -135,7 +136,7 @@ export class ReleaseService {
                 const result = await this.provider.listReleases(app.repo, { page: 1, perPage: 100 });
                 const releases = this.transformReleases(result.data);
                 this.cache.setReleases(app.id, releases, result.etag, this.defaultTtlSeconds);
-                this.logger.info("Warmed cache for app", { app: app.id, count: releases.length });
+                this.logger.info("Pulled releases from GitHub during warm", { app: app.id, count: releases.length });
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 this.logger.error("Failed to warm cache for app", { app: app.id, error: message });
