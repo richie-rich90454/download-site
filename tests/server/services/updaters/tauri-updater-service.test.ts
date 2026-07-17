@@ -53,6 +53,66 @@ describe("TauriUpdaterService", function () {
         expect(manifest.url.indexOf("app-windows-x64.exe") >= 0).toBe(true);
     });
 
+    it("returns v1 manifest for standard tauri windows target triple", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app_x64-setup.exe"),
+                helpers.createAsset("app_x64-setup.exe.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app_x64-setup.exe", "sig-content");
+
+        const result = await service.getV1Update({
+            appId: "app1",
+            currentVersion: "v1.0.0",
+            target: "x86_64-pc-windows-msvc"
+        });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app_x64-setup.exe") >= 0).toBe(true);
+    });
+
+    it("returns v1 manifest for standard tauri apple silicon target triple", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app_aarch64.dmg"),
+                helpers.createAsset("app_aarch64.dmg.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app_aarch64.dmg", "sig-content");
+
+        const result = await service.getV1Update({
+            appId: "app1",
+            currentVersion: "v1.0.0",
+            target: "aarch64-apple-darwin"
+        });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app_aarch64.dmg") >= 0).toBe(true);
+    });
+
+    it("returns v1 manifest for standard tauri linux target triple", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app_amd64.AppImage"),
+                helpers.createAsset("app_amd64.AppImage.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app_amd64.AppImage", "sig-content");
+
+        const result = await service.getV1Update({
+            appId: "app1",
+            currentVersion: "v1.0.0",
+            target: "x86_64-unknown-linux-gnu"
+        });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app_amd64.AppImage") >= 0).toBe(true);
+    });
+
     it("returns 404 when no release found", async function () {
         const result = await service.getV1Update({ appId: "app1", currentVersion: "v1.0.0", target: "windows-x86_64" });
 

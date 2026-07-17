@@ -87,6 +87,13 @@ export class TauriUpdaterService {
 
     private parseTauriTarget(target: string): types.Target {
         const parts = target.split("-");
+        if (parts.length >= 3) {
+            const arch = this.detector.normalizeArch(parts[0]) || "x64";
+            const os = this.detector.normalizeOs(parts[2]);
+            if (os !== undefined) {
+                return { os: os, arch: arch };
+            }
+        }
         const os = this.detector.normalizeOs(parts[0] || "");
         let arch = "x64";
         if (parts.length > 1) {
