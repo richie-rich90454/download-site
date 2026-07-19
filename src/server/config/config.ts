@@ -6,6 +6,8 @@ import * as types from "../../shared/types.js";
 
 dotenv.config();
 
+export const DEFAULT_MAX_CACHEABLE_SIZE = 10 * 1024 * 1024 * 1024;
+
 export interface ServerConfig {
     port: number;
     cacheDir: string;
@@ -19,6 +21,9 @@ export interface ServerConfig {
     rateLimits: {
         max: number;
         timeWindow: number;
+    };
+    assetCache?: {
+        maxCacheableSize: number;
     };
     apps: types.App[];
 }
@@ -38,7 +43,8 @@ const envSchema = z.object({
     GITHUB_PRIVATE_KEY: z.string().optional(),
     CONFIG_PATH: z.string().optional(),
     LOG_LEVEL: z.string().optional(),
-    CORS_ORIGIN: z.string().optional()
+    CORS_ORIGIN: z.string().optional(),
+    MAX_CACHEABLE_SIZE: z.coerce.number().positive().optional()
 });
 
 export type RawEnv = z.infer<typeof envSchema>;
@@ -172,6 +178,7 @@ function applyOverride(config: ServerConfig, override: Partial<ServerConfig>): S
 function buildConfig(env: RawEnv): ServerConfig {
     const apps = parseApps(env.APPS);
     const logLevel = env.LOG_LEVEL !== undefined ? env.LOG_LEVEL : "info";
+    const maxCacheableSize = env.MAX_CACHEABLE_SIZE !== undefined ? env.MAX_CACHEABLE_SIZE : DEFAULT_MAX_CACHEABLE_SIZE;
     let config: ServerConfig = {
         port: env.PORT,
         cacheDir: path.resolve(env.CACHE_DIR),
@@ -185,6 +192,9 @@ function buildConfig(env: RawEnv): ServerConfig {
         rateLimits: {
             max: 100,
             timeWindow: 60000
+        },
+        assetCache: {
+            maxCacheableSize: maxCacheableSize
         },
         apps: apps
     };

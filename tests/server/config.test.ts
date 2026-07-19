@@ -11,6 +11,7 @@ describe("loadConfig", function () {
     const originalLogLevel = process.env.LOG_LEVEL;
     const originalConfigPath = process.env.CONFIG_PATH;
     const originalGithubToken = process.env.GITHUB_TOKEN;
+    const originalMaxCacheableSize = process.env.MAX_CACHEABLE_SIZE;
 
     beforeEach(function () {
         delete process.env.PORT;
@@ -19,6 +20,7 @@ describe("loadConfig", function () {
         delete process.env.LOG_LEVEL;
         delete process.env.CONFIG_PATH;
         delete process.env.GITHUB_TOKEN;
+        delete process.env.MAX_CACHEABLE_SIZE;
     });
 
     afterEach(function () {
@@ -28,6 +30,7 @@ describe("loadConfig", function () {
         process.env.LOG_LEVEL = originalLogLevel;
         process.env.CONFIG_PATH = originalConfigPath;
         process.env.GITHUB_TOKEN = originalGithubToken;
+        process.env.MAX_CACHEABLE_SIZE = originalMaxCacheableSize;
     });
 
     it("loads required configuration", function () {
@@ -53,6 +56,17 @@ describe("loadConfig", function () {
         const cfg = config.loadConfig();
 
         expect(cfg.logLevel).toBe("info");
+    });
+
+    it("uses custom MAX_CACHEABLE_SIZE from environment", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        process.env.MAX_CACHEABLE_SIZE = "2048";
+
+        const cfg = config.loadConfig();
+
+        expect(cfg.assetCache.maxCacheableSize).toBe(2048);
     });
 
     it("throws when PORT is missing", function () {
