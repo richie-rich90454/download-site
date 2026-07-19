@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import type { FastifyReply } from "fastify";
 import * as path from "node:path";
+import * as undici from "undici";
 import * as types from "../../shared/types.js";
 import * as assetCache from "../cache/asset-cache.js";
 import * as platform from "../platform/platform-detector.js";
@@ -16,9 +17,10 @@ function isFastifyReply(reply: ReplyLike): reply is FastifyReply {
 }
 
 export interface DownloadResult {
-    filePath: string;
+    filePath?: string;
     asset: types.Asset;
     release: types.Release;
+    proxied: boolean;
 }
 
 export interface DownloadOptions {
@@ -35,6 +37,7 @@ export class DownloadService {
     private readonly metrics: metrics.MetricsService;
     private readonly logger: logger.Logger;
     private readonly baseUrl: string;
+    private readonly limits: assetCache.AssetCacheLimits;
 
     constructor(
         releaseService: release.ReleaseService,
@@ -42,7 +45,8 @@ export class DownloadService {
         detector: platform.PlatformDetector,
         metricsInstance: metrics.MetricsService,
         loggerInstance: logger.Logger,
-        baseUrl: string
+        baseUrl: string,
+        limits?: assetCache.AssetCacheLimits
     ) {
         this.releaseService = releaseService;
         this.assetCache = assetCacheService;
@@ -50,6 +54,19 @@ export class DownloadService {
         this.metrics = metricsInstance;
         this.logger = loggerInstance;
         this.baseUrl = baseUrl;
+        if (limits !== undefined) {
+            this.limits = limits;
+        } else {
+            this.limits = {
+                maxSize: 10 * 1024 * 1024 * 1024,
+                maxCount: 1000,
+                maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+                maxCacheableSize: 10 * 1024 * 1024 * 1024
+            };
+        }
+        if (this.limits.maxCacheableSize === undefined) {
+            this.limits.maxCacheableSize = 10 * 1024 * 1024 * 1024;
+        }
     }
 
     async resolveAsset(appId: string, options: DownloadOptions): Promise<DownloadResult> {
@@ -73,6 +90,17 @@ export class DownloadService {
         if (asset === undefined) {
             throw new Error("No matching asset found for app " + appId);
         }
+        const maxCacheableSize = this.limits.maxCacheableSize as number;
+        if (asset.size > maxCacheableSize) {
+            this.logger.info("Asset exceeds cacheable size, proxying", {
+                app: appId,
+                version: releaseObj.tag,
+                asset: asset.name,
+                size: asset.size,
+                maxCacheableSize: maxCacheableSize
+            });
+            return { asset: asset, release: releaseObj, proxied: true };
+        }
         const cacheResult = await this.assetCache.getAssetPath(appId, releaseObj.tag, asset);
         this.logger.info("Asset resolved", {
             app: appId,
@@ -80,10 +108,10 @@ export class DownloadService {
             asset: asset.name,
             cached: cacheResult.cached
         });
-        return { filePath: cacheResult.filePath, asset: asset, release: releaseObj };
+        return { filePath: cacheResult.filePath, asset: asset, release: releaseObj, proxied: false };
     }
 
-    serveFile(filePath: string, assetName: string, reply: ReplyLike, rangeHeader?: string): void {
+    serveFile(filePath: string, assetName: string, reply: ReplyLike, rangeHeader?: string, checksum?: string): void {
         const stat = fs.statSync(filePath);
         const totalSize = stat.size;
         const contentType = this.getContentType(assetName);
@@ -98,6 +126,9 @@ export class DownloadService {
             "Cache-Control": "public, max-age=31536000, immutable",
             "Accept-Ranges": "bytes"
         };
+        if (checksum !== undefined && checksum.length > 0) {
+            headers["X-Checksum-SHA256"] = checksum;
+        }
         let start = 0;
         let end = totalSize - 1;
         let status = 200;
@@ -140,6 +171,108 @@ export class DownloadService {
         stream.pipe(res);
     }
 
+    async proxyDownload(
+        appId: string,
+        asset: types.Asset,
+        release: types.Release,
+        reply: ReplyLike,
+        rangeHeader?: string
+    ): Promise<void> {
+        const url = asset.browserDownloadUrl;
+        const requestHeaders: Record<string, string> = {};
+        if (rangeHeader !== undefined && rangeHeader.length > 0) {
+            requestHeaders.Range = rangeHeader;
+        }
+        const controller = new AbortController();
+        const timeout = setTimeout(function () {
+            controller.abort();
+        }, 300000);
+        try {
+            const response = await this.fetchAsset(url, controller.signal, undefined, requestHeaders);
+            if (response.statusCode < 200 || response.statusCode >= 300 || response.body === null) {
+                const status = response.statusCode < 200 || response.statusCode >= 300 ? response.statusCode : 502;
+                if (isFastifyReply(reply)) {
+                    reply.status(status).send({
+                        error: {
+                            code: "PROXY_ERROR",
+                            message: "Upstream download returned status " + status
+                        }
+                    });
+                } else {
+                    reply.statusCode = status;
+                    reply.end();
+                }
+                return;
+            }
+            if (isFastifyReply(reply)) {
+                reply.hijack();
+            }
+            const res = isFastifyReply(reply) ? reply.raw : reply;
+            const contentType = asset.contentType.length > 0 ? asset.contentType : this.getContentType(asset.name);
+            const headers: Record<string, string | string[]> = {
+                "Content-Type": contentType,
+                "Content-Disposition": 'attachment; filename="' + this.safeFilename(asset.name) + '"',
+                "Accept-Ranges": "bytes"
+            };
+            if (response.headers["content-length"] !== undefined) {
+                headers["Content-Length"] = response.headers["content-length"];
+            }
+            if (response.headers["content-range"] !== undefined) {
+                headers["Content-Range"] = response.headers["content-range"];
+            }
+            const keys = Object.keys(headers);
+            for (let i = 0; i < keys.length; i = i + 1) {
+                res.setHeader(keys[i], headers[keys[i]]);
+            }
+            res.statusCode = response.statusCode;
+            const body = response.body;
+            const self = this;
+            let bytesSent = 0;
+            body.on("data", function (chunk) {
+                bytesSent = bytesSent + (chunk as Buffer).length;
+            });
+            body.on("end", function () {
+                self.logger.info("Asset proxied", {
+                    app: appId,
+                    version: release.tag,
+                    asset: asset.name,
+                    url: url,
+                    bytes: bytesSent
+                });
+            });
+            body.on("error", function (err) {
+                self.logger.error("Proxy stream error", { url: url, error: err.message });
+                if (!res.writableEnded) {
+                    res.destroy();
+                }
+            });
+            body.pipe(res);
+            this.metrics.recordProxiedDownload(appId, release.tag, asset.size);
+            this.metrics.recordProxyBytesSaved(appId, release.tag, asset.size);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error("Proxy download failed", {
+                app: appId,
+                version: release.tag,
+                asset: asset.name,
+                error: message
+            });
+            if (isFastifyReply(reply)) {
+                reply.status(502).send({
+                    error: {
+                        code: "PROXY_ERROR",
+                        message: message
+                    }
+                });
+            } else {
+                reply.statusCode = 502;
+                reply.end();
+            }
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     buildAssetUrl(appId: string, version: string, assetName: string): string {
         return (
             this.baseUrl +
@@ -150,6 +283,30 @@ export class DownloadService {
             "&asset=" +
             encodeURIComponent(assetName)
         );
+    }
+
+    private async fetchAsset(
+        url: string,
+        signal: AbortSignal,
+        redirects?: number,
+        headers?: Record<string, string>
+    ): Promise<Awaited<ReturnType<typeof undici.request>>> {
+        const redirectCount = redirects === undefined ? 0 : redirects;
+        const response = await undici.request(url, {
+            method: "GET",
+            signal: signal,
+            headers: headers
+        });
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location !== undefined) {
+            if (redirectCount >= 5) {
+                throw new Error("Asset download redirect limit exceeded");
+            }
+            const location = Array.isArray(response.headers.location)
+                ? response.headers.location[0]
+                : response.headers.location;
+            return this.fetchAsset(location, signal, redirectCount + 1, headers);
+        }
+        return response;
     }
 
     private findAssetByName(assets: types.Asset[], name: string): types.Asset | undefined {
