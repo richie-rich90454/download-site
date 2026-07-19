@@ -113,6 +113,15 @@ describe("container", function () {
         expect(typeof resolved.getAssetPath).toBe("function");
     });
 
+    it("uses custom maxCacheableSize when configured", function () {
+        const cfg = createTestConfig();
+        cfg.assetCache = { maxCacheableSize: 1024 };
+        const services = containerModule.registerServices(cfg);
+
+        const limits = services.assetCache as unknown as { limits: { maxCacheableSize: number } };
+        expect(limits.limits.maxCacheableSize).toBe(1024);
+    });
+
     it("registers PlatformDetector singleton", function () {
         const cfg = createTestConfig();
         containerModule.registerServices(cfg);

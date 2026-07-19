@@ -64,13 +64,36 @@ export function registerServices(cfg: config.ServerConfig): Services {
     const cache = new metadataCache.SqliteMetadataCacheService(cfg.cacheDir, logger);
     container.registerInstance("MetadataCacheService", cache);
 
-    const assetCacheService = new assetCache.DiskAssetCacheService(cfg.cacheDir, logger, metricsService);
+    const maxCacheableSize =
+        cfg.assetCache !== undefined && cfg.assetCache.maxCacheableSize !== undefined
+            ? cfg.assetCache.maxCacheableSize
+            : config.DEFAULT_MAX_CACHEABLE_SIZE;
+    const assetCacheLimits: assetCache.AssetCacheLimits = {
+        maxSize: 10 * 1024 * 1024 * 1024,
+        maxCount: 1000,
+        maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+        maxCacheableSize: maxCacheableSize
+    };
+    const assetCacheService = new assetCache.DiskAssetCacheService(
+        cfg.cacheDir,
+        logger,
+        metricsService,
+        assetCacheLimits
+    );
     container.registerInstance("AssetCacheService", assetCacheService);
 
     const detector = new platform.DefaultPlatformDetector();
     container.registerInstance("PlatformDetector", detector);
 
-    const releaseSvc = new releaseService.ReleaseService(cfg, provider, cache, detector, healthService, logger);
+    const releaseSvc = new releaseService.ReleaseService(
+        cfg,
+        provider,
+        cache,
+        assetCacheService,
+        detector,
+        healthService,
+        logger
+    );
     container.registerInstance("ReleaseService", releaseSvc);
 
     const baseUrl = "http://localhost:" + cfg.port;
@@ -80,7 +103,8 @@ export function registerServices(cfg: config.ServerConfig): Services {
         detector,
         metricsService,
         logger,
-        baseUrl
+        baseUrl,
+        assetCacheLimits
     );
     container.registerInstance("DownloadService", downloadSvc);
 
