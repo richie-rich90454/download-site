@@ -7,6 +7,8 @@ export class MetricsService {
     readonly cacheHitsTotal: prom.Counter;
     readonly cacheMissesTotal: prom.Counter;
     readonly downloadBytesTotal: prom.Counter;
+    readonly proxiedDownloadsTotal: prom.Counter;
+    readonly proxyBytesSavedTotal: prom.Counter;
     readonly githubApiCallsTotal: prom.Counter;
     readonly githubApiDurationSeconds: prom.Histogram;
 
@@ -51,6 +53,20 @@ export class MetricsService {
             registers: [this.registry]
         });
 
+        this.proxiedDownloadsTotal = new prom.Counter({
+            name: "proxied_downloads_total",
+            help: "Total proxied downloads",
+            labelNames: ["app", "version"],
+            registers: [this.registry]
+        });
+
+        this.proxyBytesSavedTotal = new prom.Counter({
+            name: "proxy_bytes_saved_total",
+            help: "Total bytes saved by proxying instead of caching",
+            labelNames: ["app", "version"],
+            registers: [this.registry]
+        });
+
         this.githubApiCallsTotal = new prom.Counter({
             name: "github_api_calls_total",
             help: "Total GitHub API calls",
@@ -82,6 +98,15 @@ export class MetricsService {
 
     recordDownloadBytes(app: string, version: string, bytes: number): void {
         this.downloadBytesTotal.inc({ app: app, version: version }, bytes);
+    }
+
+    recordProxiedDownload(app: string, version: string, size: number): void {
+        this.proxiedDownloadsTotal.inc({ app: app, version: version });
+        this.proxyBytesSavedTotal.inc({ app: app, version: version }, size);
+    }
+
+    recordProxyBytesSaved(app: string, version: string, size: number): void {
+        this.proxyBytesSavedTotal.inc({ app: app, version: version }, size);
     }
 
     recordGitHubApiCall(method: string, status: number): void {
