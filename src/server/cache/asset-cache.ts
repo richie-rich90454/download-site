@@ -36,6 +36,7 @@ export interface AssetCacheLimits {
     maxCount: number;
     maxAgeMs: number;
     maxCacheableSize?: number;
+    cleanupIntervalMs?: number;
 }
 
 interface AssetCacheRow {
@@ -68,7 +69,7 @@ export class DiskAssetCacheService implements AssetCacheService {
     private readonly deleteAppVersionAssetStmt: Database.Statement<[string, string, string]>;
     private readonly deleteAllStmt: Database.Statement<[]>;
     private readonly allStmt: Database.Statement<[]>;
-    private readonly cleanupInterval: ReturnType<typeof setInterval>;
+    private readonly cleanupInterval: ReturnType<typeof setInterval> | undefined;
     private readonly inFlight: Map<string, Promise<AssetCacheResult>>;
 
     constructor(
@@ -119,10 +120,13 @@ export class DiskAssetCacheService implements AssetCacheService {
             "SELECT app, version, asset_name, file_path, size, checksum, last_accessed_at, created_at FROM asset_cache ORDER BY last_accessed_at ASC"
         );
         this.inFlight = new Map();
-        const self = this;
-        this.cleanupInterval = setInterval(function () {
-            self.runCleanup();
-        }, 60000);
+        const cleanupIntervalMs = this.limits.cleanupIntervalMs === undefined ? 60000 : this.limits.cleanupIntervalMs;
+        if (cleanupIntervalMs > 0) {
+            const self = this;
+            this.cleanupInterval = setInterval(function () {
+                self.runCleanup();
+            }, cleanupIntervalMs);
+        }
     }
 
     async getAssetPath(app: string, version: string, asset: types.Asset): Promise<AssetCacheResult> {
@@ -181,7 +185,9 @@ export class DiskAssetCacheService implements AssetCacheService {
     }
 
     close(): void {
-        clearInterval(this.cleanupInterval);
+        if (this.cleanupInterval !== undefined) {
+            clearInterval(this.cleanupInterval);
+        }
         this.db.close();
     }
 
