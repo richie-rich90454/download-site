@@ -45,10 +45,10 @@ The server is built on [Fastify](https://www.fastify.io/).
 - **Asset cache** - A disk-backed cache (`DiskAssetCacheService`) downloads, checksums, and stores release installers. A SQLite index tracks file paths, sizes, checksums, and access times.
 - **Download service** - Resolves and serves assets. It uses the `PlatformDetector` to pick the best asset for a user-agent or explicit `platform` hint and supports HTTP range requests.
 - **Updaters** - Dedicated services translate releases into the formats expected by popular auto-updaters:
-  - `TauriUpdaterService` for Tauri v1 and v2
-  - `SquirrelUpdaterService` for Squirrel.Windows
-  - `SparkleUpdaterService` for Sparkle (macOS)
-  - `GenericUpdaterService` for a generic JSON manifest
+    - `TauriUpdaterService` for Tauri v1 and v2
+    - `SquirrelUpdaterService` for Squirrel.Windows
+    - `SparkleUpdaterService` for Sparkle (macOS)
+    - `GenericUpdaterService` for a generic JSON manifest
 - **Security** - Admin endpoints require `ADMIN_API_KEY`. GitHub webhooks are verified with `WEBHOOK_SECRET`. Helmet, CORS, and rate limiting are configured by plugins.
 - **Observability** - Prometheus-compatible metrics at `/metrics`, structured logging via Pino, and health/readiness/liveness probes at `/health/*`.
 
@@ -57,7 +57,7 @@ The server is built on [Fastify](https://www.fastify.io/).
 Configuration is driven by environment variables. You can also override values with a JSON file pointed to by `CONFIG_PATH`.
 
 | Variable | Required | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `PORT` | Yes | `3000` | HTTP port the server listens on. |
 | `CACHE_DIR` | Yes | `./cache` | Directory for the SQLite metadata index and cached assets. |
 | `APPS` | Yes | - | JSON array of `{ id, repo, name }` objects defining the apps to serve. |
@@ -110,11 +110,11 @@ Response:
 
 ```json
 {
-  "version": "1.1.0",
-  "notes": "Release notes",
-  "pub_date": "2025-01-01T00:00:00Z",
-  "signature": "base64-or-hex-signature",
-  "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x64-setup.exe"
+    "version": "1.1.0",
+    "notes": "Release notes",
+    "pub_date": "2025-01-01T00:00:00Z",
+    "signature": "base64-or-hex-signature",
+    "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x64-setup.exe"
 }
 ```
 
@@ -128,19 +128,19 @@ Response includes a `platforms` map with keys such as `windows-x86_64`, `darwin-
 
 ```json
 {
-  "version": "1.1.0",
-  "notes": "Release notes",
-  "pub_date": "2025-01-01T00:00:00Z",
-  "platforms": {
-    "windows-x86_64": {
-      "signature": "base64-or-hex-signature",
-      "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x64-setup.exe"
-    },
-    "darwin-aarch64": {
-      "signature": "base64-or-hex-signature",
-      "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_aarch64.dmg"
+    "version": "1.1.0",
+    "notes": "Release notes",
+    "pub_date": "2025-01-01T00:00:00Z",
+    "platforms": {
+        "windows-x86_64": {
+            "signature": "base64-or-hex-signature",
+            "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x64-setup.exe"
+        },
+        "darwin-aarch64": {
+            "signature": "base64-or-hex-signature",
+            "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_aarch64.dmg"
+        }
     }
-  }
 }
 ```
 
@@ -154,10 +154,10 @@ Response:
 
 ```json
 {
-  "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp-1.1.0-full.nupkg",
-  "name": "v1.1.0",
-  "notes": "Release notes",
-  "pub_date": "2025-01-01T00:00:00Z"
+    "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp-1.1.0-full.nupkg",
+    "name": "v1.1.0",
+    "notes": "Release notes",
+    "pub_date": "2025-01-01T00:00:00Z"
 }
 ```
 
@@ -179,30 +179,30 @@ Response:
 
 ```json
 {
-  "version": "1.1.0",
-  "notes": "Release notes",
-  "pubDate": "2025-01-01T00:00:00Z",
-  "platforms": {
-    "windows_x64": {
-      "signature": "base64-or-hex-signature",
-      "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x64-setup.exe"
-    },
-    "darwin_arm64": {
-      "signature": "base64-or-hex-signature",
-      "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_aarch64.dmg"
-    },
-    "linux_x64": {
-      "signature": "base64-or-hex-signature",
-      "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x86_64.AppImage"
+    "version": "1.1.0",
+    "notes": "Release notes",
+    "pubDate": "2025-01-01T00:00:00Z",
+    "platforms": {
+        "windows_x64": {
+            "signature": "base64-or-hex-signature",
+            "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x64-setup.exe"
+        },
+        "darwin_arm64": {
+            "signature": "base64-or-hex-signature",
+            "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_aarch64.dmg"
+        },
+        "linux_x64": {
+            "signature": "base64-or-hex-signature",
+            "url": "https://your-server.com/download/myapp?version=v1.1.0&asset=myapp_1.1.0_x86_64.AppImage"
+        }
     }
-  }
 }
 ```
 
 ## API Endpoint Summary
 
 | Method | Path | Description | Auth |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | GET | `/health` | Overall health status. | None |
 | GET | `/health/ready` | Readiness probe. Returns 503 when not ready. | None |
 | GET | `/health/live` | Liveness probe. | None |
