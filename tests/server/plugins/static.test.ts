@@ -1,22 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Fastify from "fastify";
 import * as fs from "node:fs";
 import * as path from "node:path";
-
-vi.mock("node:fs", async function () {
-    const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
-    return Object.assign({}, actual, { existsSync: vi.fn() });
-});
-
 import * as staticPlugin from "../../../src/server/plugins/static.js";
 
 describe("static plugin", function () {
     const originalNodeEnv = process.env.NODE_ENV;
-    const mockedExistsSync = vi.mocked(fs.existsSync);
 
     beforeEach(function () {
         process.env.NODE_ENV = "test";
-        mockedExistsSync.mockReturnValue(false);
     });
 
     afterEach(function () {
@@ -25,22 +17,25 @@ describe("static plugin", function () {
         } else {
             delete process.env.NODE_ENV;
         }
-        vi.clearAllMocks();
     });
 
     it("resolves dist/public when dist index exists", function () {
         const distIndex = path.resolve(process.cwd(), "dist", "public", "index.html");
-        mockedExistsSync.mockImplementation(function (targetPath) {
+        const existsSyncFn = function (targetPath: string): boolean {
             return targetPath === distIndex;
-        });
+        };
 
-        const publicDir = staticPlugin.getPublicDir();
+        const publicDir = staticPlugin.resolvePublicDir(existsSyncFn);
 
         expect(publicDir).toBe(path.resolve(process.cwd(), "dist", "public"));
     });
 
     it("resolves public dir when dist index is missing", function () {
-        const publicDir = staticPlugin.getPublicDir();
+        const existsSyncFn = function (): boolean {
+            return false;
+        };
+
+        const publicDir = staticPlugin.resolvePublicDir(existsSyncFn);
 
         expect(publicDir).toBe(path.resolve(process.cwd(), "public"));
     });

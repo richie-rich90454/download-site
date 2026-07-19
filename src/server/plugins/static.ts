@@ -7,13 +7,14 @@ function isProduction(): boolean {
     return process.env.NODE_ENV === "production";
 }
 
-function resolvePublicDir(): string {
+function resolvePublicDir(existsSyncFn?: (targetPath: string) => boolean): string {
+    const checkExists = existsSyncFn !== undefined ? existsSyncFn : fs.existsSync;
     const distPublic = path.resolve(process.cwd(), "dist", "public");
     const distIndex = path.resolve(distPublic, "index.html");
     if (isProduction()) {
         return distPublic;
     }
-    if (fs.existsSync(distIndex)) {
+    if (checkExists(distIndex)) {
         return distPublic;
     }
     return path.resolve(process.cwd(), "public");
@@ -22,6 +23,8 @@ function resolvePublicDir(): string {
 export function getPublicDir(): string {
     return resolvePublicDir();
 }
+
+export { resolvePublicDir };
 
 export async function registerStatic(app: FastifyInstance): Promise<void> {
     const publicDir = resolvePublicDir();
