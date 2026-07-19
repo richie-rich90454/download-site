@@ -9,6 +9,7 @@ import * as metrics from "../telemetry/metrics.js";
 
 export interface AssetCacheService {
     getAssetPath(app: string, version: string, asset: types.Asset): Promise<AssetCacheResult>;
+    getChecksum(app: string, version: string, assetName: string): string | undefined;
     purge(app?: string, version?: string, assetName?: string): void;
     close(): void;
 }
@@ -34,6 +35,7 @@ export interface AssetCacheLimits {
     maxSize: number;
     maxCount: number;
     maxAgeMs: number;
+    maxCacheableSize?: number;
 }
 
 interface AssetCacheRow {
@@ -84,8 +86,12 @@ export class DiskAssetCacheService implements AssetCacheService {
             this.limits = {
                 maxSize: 10 * 1024 * 1024 * 1024,
                 maxCount: 1000,
-                maxAgeMs: 7 * 24 * 60 * 60 * 1000
+                maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+                maxCacheableSize: 10 * 1024 * 1024 * 1024
             };
+        }
+        if (this.limits.maxCacheableSize === undefined) {
+            this.limits.maxCacheableSize = 10 * 1024 * 1024 * 1024;
         }
         if (!fs.existsSync(this.cacheDir)) {
             fs.mkdirSync(this.cacheDir, { recursive: true });
@@ -138,6 +144,14 @@ export class DiskAssetCacheService implements AssetCacheService {
             }
         );
         return promise;
+    }
+
+    getChecksum(app: string, version: string, assetName: string): string | undefined {
+        const row = this.getStmt.get(app, version, assetName) as AssetCacheRow | undefined;
+        if (row === undefined) {
+            return undefined;
+        }
+        return row.checksum;
     }
 
     purge(app?: string, version?: string, assetName?: string): void {

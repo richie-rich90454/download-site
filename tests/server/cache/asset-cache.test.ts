@@ -2,6 +2,7 @@
  * @vitest-environment node
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -77,6 +78,27 @@ describe("DiskAssetCacheService", function () {
         expect(result.cached).toBe(false);
         expect(fs.existsSync(result.filePath)).toBe(true);
         expect(fs.readFileSync(result.filePath).toString()).toBe("hello asset");
+    });
+
+    it("returns stored checksum without downloading", async function () {
+        const data = Buffer.from("hello asset");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const expectedChecksum = crypto.createHash("sha256").update(data).digest("hex");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        const checksum = cache.getChecksum("app1", "v1.0.0", "app.exe");
+
+        expect(checksum).toBe(expectedChecksum);
+    });
+
+    it("returns undefined checksum for uncached asset", async function () {
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        const checksum = cache.getChecksum("app1", "v1.0.0", "missing.exe");
+
+        expect(checksum).toBeUndefined();
     });
 
     it("returns cached path on second request", async function () {
@@ -458,6 +480,55 @@ describe("DiskAssetCacheService", function () {
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it("follows a redirect when downloading an asset", async function () {
+        const data = Buffer.from("redirected asset");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request)
+            .mockResolvedValueOnce({
+                statusCode: 302,
+                headers: { location: "http://example.com/redirected.exe" },
+                body: null
+            } as unknown as Awaited<ReturnType<typeof undici.request>>)
+            .mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+        expect(fs.readFileSync(result.filePath).toString()).toBe("redirected asset");
+        expect(undici.request).toHaveBeenCalledTimes(2);
+    });
+
+    it("handles redirect location provided as array", async function () {
+        const data = Buffer.from("array redirect");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request)
+            .mockResolvedValueOnce({
+                statusCode: 301,
+                headers: { location: ["http://example.com/redirected.exe"] },
+                body: null
+            } as unknown as Awaited<ReturnType<typeof undici.request>>)
+            .mockResolvedValueOnce(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+        expect(fs.readFileSync(result.filePath).toString()).toBe("array redirect");
+    });
+
+    it("throws when redirect limit is exceeded", async function () {
+        const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue({
+            statusCode: 302,
+            headers: { location: "http://example.com/redirect.exe" },
+            body: null
+        } as unknown as Awaited<ReturnType<typeof undici.request>>);
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow(
+            "Asset download redirect limit exceeded"
+        );
     });
 
     it("aborts download when timeout fires", async function () {
