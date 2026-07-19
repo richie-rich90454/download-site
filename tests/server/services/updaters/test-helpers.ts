@@ -31,9 +31,14 @@ export class MockDownloadService {
 export class MockAssetCache implements assetCache.AssetCacheService {
     private sigDir: string;
     private signatures: Record<string, string> = {};
+    private checksums: Record<string, string> = {};
 
     constructor() {
         this.sigDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-sig-"));
+    }
+
+    setChecksum(app: string, version: string, assetName: string, checksum: string): void {
+        this.checksums[app + "/" + version + "/" + assetName] = checksum;
     }
 
     registerSignature(assetName: string, signature: string): void {
@@ -58,6 +63,10 @@ export class MockAssetCache implements assetCache.AssetCacheService {
                 createdAt: Date.now()
             }
         };
+    }
+
+    getChecksum(app: string, version: string, assetName: string): string | undefined {
+        return this.checksums[app + "/" + version + "/" + assetName];
     }
 
     purge(): void {

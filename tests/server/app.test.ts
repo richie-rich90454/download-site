@@ -127,6 +127,10 @@ class MockAssetCache implements assetCache.AssetCacheService {
         };
     }
 
+    getChecksum(): string | undefined {
+        return undefined;
+    }
+
     purge(app?: string, version?: string, assetName?: string): void {
         this.purgeCalls.push({ app: app, version: version, assetName: assetName });
     }

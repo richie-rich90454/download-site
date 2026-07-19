@@ -51,7 +51,8 @@ const updateResponseSchema = {
                     name: { type: "string" },
                     size: { type: "number" },
                     url: { type: "string" },
-                    browserDownloadUrl: { type: "string" }
+                    browserDownloadUrl: { type: "string" },
+                    checksum: { type: "string" }
                 }
             }
         }
@@ -322,15 +323,17 @@ function buildAssetLinks(
     downloadService: { buildAssetUrl(appId: string, version: string, assetName: string): string },
     appId: string,
     release: Release
-): Array<{ name: string; size: number; url: string; browserDownloadUrl: string }> {
-    const result: Array<{ name: string; size: number; url: string; browserDownloadUrl: string }> = [];
+): Array<{ name: string; size: number; url: string; browserDownloadUrl: string; checksum?: string }> {
+    const result: Array<{ name: string; size: number; url: string; browserDownloadUrl: string; checksum?: string }> =
+        [];
     for (let i = 0; i < release.assets.length; i = i + 1) {
         const asset: Asset = release.assets[i];
         result.push({
             name: asset.name,
             size: asset.size,
             url: downloadService.buildAssetUrl(appId, release.tag, asset.name),
-            browserDownloadUrl: asset.browserDownloadUrl
+            browserDownloadUrl: asset.browserDownloadUrl,
+            checksum: asset.checksum
         });
     }
     return result;

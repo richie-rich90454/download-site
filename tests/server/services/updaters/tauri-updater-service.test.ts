@@ -248,4 +248,44 @@ describe("TauriUpdaterService", function () {
         expect(result.status).toBe(204);
         expect(result.body).toBeUndefined();
     });
+
+    it("falls back to x64 arch for unknown tauri target triple arch", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app-windows-x64.exe"),
+                helpers.createAsset("app-windows-x64.exe.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app-windows-x64.exe", "sig-content");
+
+        const result = await service.getV1Update({
+            appId: "app1",
+            currentVersion: "v1.0.0",
+            target: "unknown-pc-windows-msvc"
+        });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app-windows-x64.exe") >= 0).toBe(true);
+    });
+
+    it("falls back to linux when tauri target triple os is unknown", async function () {
+        releaseSvc.setRelease(
+            helpers.createRelease("v1.1.0", [
+                helpers.createAsset("app-linux-x64.tar.gz"),
+                helpers.createAsset("app-linux-x64.tar.gz.sig")
+            ])
+        );
+        assetCacheSvc.registerSignature("app-linux-x64.tar.gz", "sig-content");
+
+        const result = await service.getV1Update({
+            appId: "app1",
+            currentVersion: "v1.0.0",
+            target: "x86_64-pc-unknown-os"
+        });
+
+        expect(result.status).toBe(200);
+        const manifest = result.body as updaterTypes.TauriV1Manifest;
+        expect(manifest.url.indexOf("app-linux-x64.tar.gz") >= 0).toBe(true);
+    });
 });

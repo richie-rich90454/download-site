@@ -35,7 +35,8 @@ const releaseSchema = {
                     size: { type: "number" },
                     contentType: { type: "string" },
                     url: { type: "string" },
-                    browserDownloadUrl: { type: "string" }
+                    browserDownloadUrl: { type: "string" },
+                    checksum: { type: "string" }
                 }
             }
         }

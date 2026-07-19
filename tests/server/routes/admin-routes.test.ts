@@ -203,4 +203,48 @@ describe("registerAdminRoutes", function () {
         expect(replyResult.statusCode.value).toBe(404);
         expect(replyResult.payload.value).toEqual({ error: { code: "NOT_FOUND", message: "Release not found" } });
     });
+
+    it("redownloads all assets when asset is omitted", async function () {
+        const services = buildServices();
+        const context = createFakeApp(services);
+        await adminRoutes.registerAdminRoutes(context.app);
+        const handler = findHandler(context.routes, "/admin/assets/redownload");
+        release.getReleaseByTag.mockResolvedValue({
+            tag: "v1.0.0",
+            assets: [
+                { name: "app.exe", size: 100, browserDownloadUrl: "http://example.com/app.exe" },
+                { name: "app.dmg", size: 100, browserDownloadUrl: "http://example.com/app.dmg" }
+            ]
+        });
+        assetCache.getAssetPath.mockResolvedValue({ filePath: "/cache/app.exe" });
+        const replyResult = createReply();
+
+        await handler(createRequest({ app: "app1", version: "v1.0.0" }), replyResult.reply as unknown as FastifyReply);
+
+        expect(assetCache.purge).toHaveBeenCalledTimes(2);
+        expect(assetCache.getAssetPath).toHaveBeenCalledTimes(2);
+        expect(replyResult.payload.value).toEqual({ success: true });
+    });
+
+    it("returns 404 when redownload asset is not found", async function () {
+        const services = buildServices();
+        const context = createFakeApp(services);
+        await adminRoutes.registerAdminRoutes(context.app);
+        const handler = findHandler(context.routes, "/admin/assets/redownload");
+        release.getReleaseByTag.mockResolvedValue({
+            tag: "v1.0.0",
+            assets: [{ name: "app.exe", size: 100, browserDownloadUrl: "http://example.com/app.exe" }]
+        });
+        const replyResult = createReply();
+
+        await handler(
+            createRequest({ app: "app1", version: "v1.0.0", asset: "missing.exe" }),
+            replyResult.reply as unknown as FastifyReply
+        );
+
+        expect(replyResult.statusCode.value).toBe(404);
+        expect(replyResult.payload.value).toEqual({
+            error: { code: "NOT_FOUND", message: "Asset not found: missing.exe" }
+        });
+    });
 });
