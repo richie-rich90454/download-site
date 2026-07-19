@@ -276,7 +276,12 @@ describe("DiskAssetCacheService", function () {
     });
 
     it("removes expired entries during background cleanup", async function () {
-        const limits: assetCache.AssetCacheLimits = { maxSize: 100 * 1024 * 1024, maxCount: 100, maxAgeMs: 1 };
+        const limits: assetCache.AssetCacheLimits = {
+            maxSize: 100 * 1024 * 1024,
+            maxCount: 100,
+            maxAgeMs: 1,
+            cleanupIntervalMs: 0
+        };
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data = Buffer.from("expiring soon");
         const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
@@ -293,7 +298,12 @@ describe("DiskAssetCacheService", function () {
     });
 
     it("re-downloads when cached entry is expired", async function () {
-        const limits: assetCache.AssetCacheLimits = { maxSize: 100 * 1024 * 1024, maxCount: 100, maxAgeMs: 1 };
+        const limits: assetCache.AssetCacheLimits = {
+            maxSize: 100 * 1024 * 1024,
+            maxCount: 100,
+            maxAgeMs: 1,
+            cleanupIntervalMs: 0
+        };
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data1 = Buffer.from("first");
         const data2 = Buffer.from("second");
