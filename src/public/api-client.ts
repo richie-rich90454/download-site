@@ -4,6 +4,7 @@ export interface PublicAsset {
     contentType: string;
     url: string;
     browserDownloadUrl: string;
+    checksum?: string;
 }
 
 export interface PublicRelease {
