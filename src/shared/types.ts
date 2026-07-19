@@ -12,6 +12,7 @@ export interface Asset {
     contentType: string;
     url: string;
     browserDownloadUrl: string;
+    checksum?: string;
 }
 
 export interface Release {
