@@ -2,6 +2,7 @@ import * as config from "../config/config.js";
 import * as types from "../../shared/types.js";
 import * as githubTypes from "../github/github-types.js";
 import * as metadataCache from "../cache/metadata-cache.js";
+import * as assetCache from "../cache/asset-cache.js";
 import * as platform from "../platform/platform-detector.js";
 import * as health from "../health/health-service.js";
 import * as logger from "../logging/logger.js";
@@ -16,6 +17,7 @@ export class ReleaseService {
     private readonly cfg: config.ServerConfig;
     private readonly provider: githubTypes.GitHubProvider;
     private readonly cache: metadataCache.MetadataCacheService;
+    private readonly assetCache: assetCache.AssetCacheService;
     private readonly detector: platform.PlatformDetector;
     private readonly healthService: health.HealthService;
     private readonly logger: logger.Logger;
@@ -25,6 +27,7 @@ export class ReleaseService {
         cfg: config.ServerConfig,
         provider: githubTypes.GitHubProvider,
         cache: metadataCache.MetadataCacheService,
+        assetCacheService: assetCache.AssetCacheService,
         detector: platform.PlatformDetector,
         healthService: health.HealthService,
         loggerInstance: logger.Logger
@@ -32,6 +35,7 @@ export class ReleaseService {
         this.cfg = cfg;
         this.provider = provider;
         this.cache = cache;
+        this.assetCache = assetCacheService;
         this.detector = detector;
         this.healthService = healthService;
         this.logger = loggerInstance;
@@ -55,7 +59,7 @@ export class ReleaseService {
             this.cache.setReleases(appId, cached.releases, etag, this.defaultTtlSeconds);
             return cached.releases;
         }
-        const releases = this.transformReleases(result.data);
+        const releases = this.transformReleases(appId, result.data);
         this.cache.setReleases(appId, releases, result.etag, this.defaultTtlSeconds);
         this.logger.info("Pulled releases from GitHub", { app: appId, count: releases.length });
         if (!includePrerelease) {
@@ -101,7 +105,7 @@ export class ReleaseService {
         const page = filters !== undefined && filters.page !== undefined ? filters.page : 1;
         const perPage = filters !== undefined && filters.perPage !== undefined ? filters.perPage : 100;
         const result = await this.provider.listReleases(app.repo, { page: page, perPage: perPage });
-        const releases = this.transformReleases(result.data);
+        const releases = this.transformReleases(appId, result.data);
         this.cache.setReleases(appId, releases, result.etag, this.defaultTtlSeconds);
         this.logger.info("Pulled releases from GitHub refresh", { app: appId, count: releases.length });
         return releases;
@@ -129,7 +133,7 @@ export class ReleaseService {
                 this.cache.setRelease(appId, tag, cached.release, etag, this.defaultTtlSeconds);
                 return cached.release;
             }
-            const release = this.transformRelease(result.data);
+            const release = this.transformRelease(appId, result.data);
             this.cache.setRelease(appId, tag, release, result.etag, this.defaultTtlSeconds);
             this.logger.info("Pulled release from GitHub", { app: appId, tag: tag });
             return release;
@@ -161,7 +165,7 @@ export class ReleaseService {
             const app = this.cfg.apps[i];
             try {
                 const result = await this.provider.listReleases(app.repo, { page: 1, perPage: 100 });
-                const releases = this.transformReleases(result.data);
+                const releases = this.transformReleases(app.id, result.data);
                 this.cache.setReleases(app.id, releases, result.etag, this.defaultTtlSeconds);
                 this.logger.info("Pulled releases from GitHub during warm", { app: app.id, count: releases.length });
             } catch (err) {
@@ -182,15 +186,15 @@ export class ReleaseService {
         throw new Error("App not found: " + appId);
     }
 
-    private transformReleases(githubReleases: types.GitHubRelease[]): types.Release[] {
+    private transformReleases(appId: string, githubReleases: types.GitHubRelease[]): types.Release[] {
         const result: types.Release[] = [];
         for (let i = 0; i < githubReleases.length; i = i + 1) {
-            result.push(this.transformRelease(githubReleases[i]));
+            result.push(this.transformRelease(appId, githubReleases[i]));
         }
         return result;
     }
 
-    private transformRelease(githubRelease: types.GitHubRelease | undefined): types.Release {
+    private transformRelease(appId: string, githubRelease: types.GitHubRelease | undefined): types.Release {
         if (githubRelease === undefined) {
             throw new Error("GitHub release data is undefined");
         }
@@ -200,11 +204,11 @@ export class ReleaseService {
             notes: githubRelease.body !== null ? githubRelease.body : "",
             publishedAt: githubRelease.published_at,
             prerelease: githubRelease.prerelease,
-            assets: this.transformAssets(githubRelease.assets)
+            assets: this.transformAssets(appId, githubRelease.tag_name, githubRelease.assets)
         };
     }
 
-    private transformAssets(githubAssets: types.GitHubAsset[]): types.Asset[] {
+    private transformAssets(appId: string, tag: string, githubAssets: types.GitHubAsset[]): types.Asset[] {
         const result: types.Asset[] = [];
         for (let i = 0; i < githubAssets.length; i = i + 1) {
             const asset = githubAssets[i];
@@ -213,7 +217,8 @@ export class ReleaseService {
                 size: asset.size,
                 contentType: asset.content_type,
                 url: asset.url,
-                browserDownloadUrl: asset.browser_download_url
+                browserDownloadUrl: asset.browser_download_url,
+                checksum: this.assetCache.getChecksum(appId, tag, asset.name)
             });
         }
         return result;

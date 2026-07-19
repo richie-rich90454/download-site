@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -6,6 +6,7 @@ import * as types from "../../../src/shared/types.js";
 import * as config from "../../../src/server/config/config.js";
 import * as githubTypes from "../../../src/server/github/github-types.js";
 import * as metadataCache from "../../../src/server/cache/metadata-cache.js";
+import * as assetCache from "../../../src/server/cache/asset-cache.js";
 import * as platform from "../../../src/server/platform/platform-detector.js";
 import * as health from "../../../src/server/health/health-service.js";
 import * as releaseService from "../../../src/server/services/release-service.js";
@@ -39,6 +40,43 @@ function createConfig(): config.ServerConfig {
         rateLimits: { max: 100, timeWindow: 60000 },
         apps: [{ id: "app1", repo: "owner/repo", name: "App One" }]
     };
+}
+
+class MockAssetCache implements assetCache.AssetCacheService {
+    private checksums: Record<string, string> = {};
+
+    setChecksum(app: string, version: string, assetName: string, checksum: string): void {
+        this.checksums[app + "/" + version + "/" + assetName] = checksum;
+    }
+
+    async getAssetPath(): Promise<assetCache.AssetCacheResult> {
+        return {
+            filePath: "/tmp/asset.exe",
+            cached: true,
+            entry: {
+                app: "app1",
+                version: "v1.0.0",
+                assetName: "app-windows.exe",
+                filePath: "/tmp/asset.exe",
+                size: 100,
+                checksum: "",
+                lastAccessedAt: Date.now(),
+                createdAt: Date.now()
+            }
+        };
+    }
+
+    getChecksum(app: string, version: string, assetName: string): string | undefined {
+        return this.checksums[app + "/" + version + "/" + assetName];
+    }
+
+    purge(): void {
+        // no-op
+    }
+
+    close(): void {
+        // no-op
+    }
 }
 
 class MockHealthService implements health.HealthService {
@@ -156,6 +194,7 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
 describe("ReleaseService", function () {
     let provider: MockGitHubProvider;
     let cache: metadataCache.SqliteMetadataCacheService;
+    let assetCacheSvc: MockAssetCache;
     let service: releaseService.ReleaseService;
     let healthService: MockHealthService;
     let tempDir: string;
@@ -164,11 +203,13 @@ describe("ReleaseService", function () {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-release-"));
         provider = new MockGitHubProvider();
         cache = new metadataCache.SqliteMetadataCacheService(tempDir, new SilentLogger());
+        assetCacheSvc = new MockAssetCache();
         healthService = new MockHealthService();
         service = new releaseService.ReleaseService(
             createConfig(),
             provider,
             cache,
+            assetCacheSvc,
             new platform.DefaultPlatformDetector(),
             healthService,
             new SilentLogger()
@@ -187,6 +228,17 @@ describe("ReleaseService", function () {
 
         expect(releases.length).toBe(1);
         expect(releases[0].tag).toBe("v1.0.0");
+    });
+
+    it("includes cached checksum in transformed assets", async function () {
+        assetCacheSvc.setChecksum("app1", "v1.0.0", "app-windows.exe", "abc123");
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+
+        const release = await service.getReleaseByTag("app1", "v1.0.0");
+
+        expect(release).toBeDefined();
+        expect(release.assets.length).toBe(1);
+        expect(release.assets[0].checksum).toBe("abc123");
     });
 
     it("uses cached releases when not expired", async function () {
@@ -358,6 +410,7 @@ describe("ReleaseService", function () {
             cfg,
             provider,
             cache,
+            assetCacheSvc,
             new platform.DefaultPlatformDetector(),
             healthService,
             new SilentLogger()
@@ -495,6 +548,17 @@ describe("ReleaseService", function () {
 
         expect(releases.length).toBe(1);
         expect(releases[0].tag).toBe("v2.0.0");
+    });
+
+    it("refreshReleases passes pagination filters to provider", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        const spy = vi.spyOn(provider, "listReleases");
+
+        const releases = await service.refreshReleases("app1", { page: 3, perPage: 50 });
+
+        expect(releases.length).toBe(1);
+        expect(spy).toHaveBeenCalledWith("owner/repo", { page: 3, perPage: 50 });
+        spy.mockRestore();
     });
 
     it("refreshReleaseByTag invalidates tag and fetches from provider", async function () {
