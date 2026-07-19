@@ -1,3 +1,7 @@
+# Agent specs and instructions
+/.trae/
+/AGENTS.md
+
 # Build output
 /dist/
 
