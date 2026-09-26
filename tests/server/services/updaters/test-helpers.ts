@@ -69,6 +69,10 @@ export class MockAssetCache implements assetCache.AssetCacheService {
         return this.checksums[app + "/" + version + "/" + assetName];
     }
 
+    getStats(): assetCache.AssetCacheStats {
+        return { totalSize: 0, totalCount: 0 };
+    }
+
     purge(): void {
         // no-op
     }
