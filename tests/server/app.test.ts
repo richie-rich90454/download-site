@@ -24,6 +24,9 @@ import * as types from "../../src/shared/types.js";
 import * as githubTypes from "../../src/server/github/github-types.js";
 import { SilentLogger } from "./test-helpers.js";
 
+const TEST_ADMIN_KEY = "test-admin-key-0123456789abcdefghijklmnop";
+const TEST_WEBHOOK_SECRET = "test-webhook-secret-0123456789abcdefghijklmno";
+
 function createTestConfig(): config.ServerConfig {
     return {
         port: 3000,
@@ -32,6 +35,8 @@ function createTestConfig(): config.ServerConfig {
         corsOrigin: "*",
         github: { token: undefined, appId: undefined, privateKey: undefined },
         rateLimits: { max: 1000, timeWindow: 60000 },
+        adminApiKey: undefined,
+        webhookSecret: undefined,
         apps: [
             { id: "app1", repo: "owner/app1", name: "App One" },
             { id: "app2", repo: "owner/app2", name: "App Two" }
@@ -359,28 +364,14 @@ function buildTestServices(): Services {
 vitest.describe("buildApp", function () {
     let services: Services;
     let tempDir: string;
-    const originalAdminKey = process.env.ADMIN_API_KEY;
-    const originalWebhookSecret = process.env.WEBHOOK_SECRET;
 
     vitest.beforeEach(function () {
-        delete process.env.ADMIN_API_KEY;
-        delete process.env.WEBHOOK_SECRET;
         services = buildTestServices();
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-app-"));
     });
 
     vitest.afterEach(async function () {
         fs.rmSync(tempDir, { recursive: true, force: true });
-        if (originalAdminKey !== undefined) {
-            process.env.ADMIN_API_KEY = originalAdminKey;
-        } else {
-            delete process.env.ADMIN_API_KEY;
-        }
-        if (originalWebhookSecret !== undefined) {
-            process.env.WEBHOOK_SECRET = originalWebhookSecret;
-        } else {
-            delete process.env.WEBHOOK_SECRET;
-        }
     });
 
     vitest.it("registers health routes", async function () {
@@ -714,13 +705,13 @@ vitest.describe("buildApp", function () {
     });
 
     vitest.it("purges cache with valid admin key", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
             method: "POST",
             url: "/admin/cache/purge",
-            headers: { "x-admin-api-key": "secret-admin-key" },
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY },
             payload: { app: "app1" }
         });
 
@@ -729,17 +720,17 @@ vitest.describe("buildApp", function () {
         vitest.expect(body.success).toBe(true);
         const metadataCacheMock = services.metadataCache as unknown as MockMetadataCache;
         vitest.expect(metadataCacheMock.invalidatedApps).toContain("app1");
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("purges cache by app and version", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
             method: "POST",
             url: "/admin/cache/purge",
-            headers: { "x-admin-api-key": "secret-admin-key" },
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY },
             payload: { app: "app1", version: "v1.0.0" }
         });
 
@@ -752,7 +743,7 @@ vitest.describe("buildApp", function () {
                 })
             )
             .toBe(true);
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("downloads a previous version by version query", async function () {
@@ -772,7 +763,7 @@ vitest.describe("buildApp", function () {
     });
 
     vitest.it("refreshes metadata cache for an app", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const release = createRelease("v1.0.0");
         const mockRelease = services.release as unknown as MockReleaseService;
         mockRelease.setReleases([release]);
@@ -781,18 +772,18 @@ vitest.describe("buildApp", function () {
         const response = await app.inject({
             method: "POST",
             url: "/admin/cache/refresh",
-            headers: { "x-admin-api-key": "secret-admin-key" },
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY },
             payload: { app: "app1" }
         });
 
         vitest.expect(response.statusCode).toBe(200);
         const body = JSON.parse(response.payload);
         vitest.expect(body.success).toBe(true);
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("redownloads a cached asset", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const release = createRelease("v1.0.0");
         const mockRelease = services.release as unknown as MockReleaseService;
         mockRelease.setReleases([release]);
@@ -801,7 +792,7 @@ vitest.describe("buildApp", function () {
         const response = await app.inject({
             method: "POST",
             url: "/admin/assets/redownload",
-            headers: { "x-admin-api-key": "secret-admin-key" },
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY },
             payload: { app: "app1", version: "v1.0.0", asset: "app-windows.exe" }
         });
 
@@ -816,28 +807,28 @@ vitest.describe("buildApp", function () {
                 })
             )
             .toBe(true);
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("purges all caches when no scope is given", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
             method: "POST",
             url: "/admin/cache/purge",
-            headers: { "x-admin-api-key": "secret-admin-key" },
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY },
             payload: {}
         });
 
         vitest.expect(response.statusCode).toBe(200);
         const metadataCacheMock = services.metadataCache as unknown as MockMetadataCache;
         vitest.expect(metadataCacheMock.invalidatedAll).toBe(true);
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("rejects admin purge without key", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
@@ -847,11 +838,11 @@ vitest.describe("buildApp", function () {
         });
 
         vitest.expect(response.statusCode).toBe(401);
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("rejects admin purge with invalid key", async function () {
-        process.env.ADMIN_API_KEY = "secret-admin-key";
+        services.config.adminApiKey = TEST_ADMIN_KEY;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
@@ -862,11 +853,11 @@ vitest.describe("buildApp", function () {
         });
 
         vitest.expect(response.statusCode).toBe(401);
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
     });
 
     vitest.it("returns 403 for admin when key not configured", async function () {
-        delete process.env.ADMIN_API_KEY;
+        services.config.adminApiKey = undefined;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
@@ -880,14 +871,14 @@ vitest.describe("buildApp", function () {
     });
 
     vitest.it("accepts valid github webhook", async function () {
-        process.env.WEBHOOK_SECRET = "webhook-secret";
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
         const app = await appFactory.buildApp(services);
         const payload = JSON.stringify({
             action: "published",
             repository: { full_name: "owner/app1" },
             release: { tag_name: "v1.0.0" }
         });
-        const signature = "sha256=" + crypto.createHmac("sha256", "webhook-secret").update(payload).digest("hex");
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
 
         const response = await app.inject({
             method: "POST",
@@ -910,17 +901,17 @@ vitest.describe("buildApp", function () {
                 })
             )
             .toBe(true);
-        delete process.env.WEBHOOK_SECRET;
+        services.config.webhookSecret = undefined;
     });
 
     vitest.it("invalidates app cache when webhook has no release tag", async function () {
-        process.env.WEBHOOK_SECRET = "webhook-secret";
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
         const app = await appFactory.buildApp(services);
         const payload = JSON.stringify({
             action: "published",
             repository: { full_name: "owner/app1" }
         });
-        const signature = "sha256=" + crypto.createHmac("sha256", "webhook-secret").update(payload).digest("hex");
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
 
         const response = await app.inject({
             method: "POST",
@@ -937,14 +928,14 @@ vitest.describe("buildApp", function () {
         vitest.expect(body.success).toBe(true);
         const metadataCacheMock = services.metadataCache as unknown as MockMetadataCache;
         vitest.expect(metadataCacheMock.invalidatedApps).toContain("app1");
-        delete process.env.WEBHOOK_SECRET;
+        services.config.webhookSecret = undefined;
     });
 
     vitest.it("accepts github webhook without repository", async function () {
-        process.env.WEBHOOK_SECRET = "webhook-secret";
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
         const app = await appFactory.buildApp(services);
         const payload = JSON.stringify({ action: "published" });
-        const signature = "sha256=" + crypto.createHmac("sha256", "webhook-secret").update(payload).digest("hex");
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
 
         const response = await app.inject({
             method: "POST",
@@ -961,11 +952,11 @@ vitest.describe("buildApp", function () {
         vitest.expect(body.success).toBe(true);
         const metadataCacheMock = services.metadataCache as unknown as MockMetadataCache;
         vitest.expect(metadataCacheMock.invalidatedApps.length).toBe(0);
-        delete process.env.WEBHOOK_SECRET;
+        services.config.webhookSecret = undefined;
     });
 
     vitest.it("rejects github webhook with invalid signature", async function () {
-        process.env.WEBHOOK_SECRET = "webhook-secret";
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
         const app = await appFactory.buildApp(services);
         const payload = JSON.stringify({ action: "published" });
 
@@ -980,11 +971,11 @@ vitest.describe("buildApp", function () {
         });
 
         vitest.expect(response.statusCode).toBe(401);
-        delete process.env.WEBHOOK_SECRET;
+        services.config.webhookSecret = undefined;
     });
 
     vitest.it("rejects github webhook when secret not configured", async function () {
-        delete process.env.WEBHOOK_SECRET;
+        services.config.webhookSecret = undefined;
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({
