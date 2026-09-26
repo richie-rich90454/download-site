@@ -39,7 +39,7 @@ interface WebhookBody {
 
 export async function registerWebhookRoutes(app: FastifyInstance): Promise<void> {
     const services = app.services;
-    const secret = process.env.WEBHOOK_SECRET;
+    const secret = services.config.webhookSecret;
     const verify = webhookVerifier.buildWebhookVerifier({ secret: secret, logger: services.logger });
 
     app.post(
