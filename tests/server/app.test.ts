@@ -12,6 +12,7 @@ import * as tracing from "../../src/server/telemetry/tracing.js";
 import * as platform from "../../src/server/platform/platform-detector.js";
 import * as releaseService from "../../src/server/services/release-service.js";
 import * as downloadService from "../../src/server/services/download-service.js";
+import * as apiError from "../../src/server/http/api-error.js";
 import * as updaterTypes from "../../src/server/services/updaters/updater-types.js";
 import * as tauriUpdater from "../../src/server/services/updaters/tauri-updater-service.js";
 import * as genericUpdater from "../../src/server/services/updaters/generic-updater-service.js";
@@ -148,6 +149,7 @@ class MockAssetCache implements assetCache.AssetCacheService {
 class MockReleaseService {
     private releases: types.Release[] = [];
     private throwOnList = false;
+    private typedError: Error | undefined = undefined;
     warmCacheCalled = false;
 
     setReleases(releases: types.Release[]): void {
@@ -158,9 +160,16 @@ class MockReleaseService {
         this.throwOnList = throwOnList;
     }
 
+    setTypedError(err: Error | undefined): void {
+        this.typedError = err;
+    }
+
     async listReleases(): Promise<types.Release[]> {
         if (this.throwOnList) {
             throw new Error("release service failure");
+        }
+        if (this.typedError !== undefined) {
+            throw this.typedError;
         }
         return this.releases;
     }
@@ -210,7 +219,9 @@ class MockDownloadService {
             options.assetName !== undefined && options.assetName.length > 0 ? options.assetName : "app-windows.exe";
         const filePath = this.files[appId + "/" + version + "/" + assetName];
         if (filePath === undefined) {
-            throw new Error("Asset not found");
+            // The real service raises typed errors; the mock must match so route-level
+            // status mapping is exercised rather than bypassed.
+            throw apiError.Errors.assetNotFound();
         }
         const release: types.Release = {
             tag: version,
@@ -1023,6 +1034,8 @@ vitest.describe("buildApp", function () {
         vitest.expect(response.statusCode).toBe(404);
         const body = JSON.parse(response.payload);
         vitest.expect(body.error.code).toBe("NOT_FOUND");
+        vitest.expect(body.error.nextStep).toBeDefined();
+        vitest.expect(body.error.requestId).toBeDefined();
     });
 
     vitest.it("returns structured error for unknown download routes", async function () {
@@ -1030,9 +1043,13 @@ vitest.describe("buildApp", function () {
 
         const response = await app.inject({ method: "GET", url: "/download/unknown" });
 
+        // An unregistered app id is a client mistake, so it is a 404 with a usable next step
+        // rather than the 500 a bare Error used to produce.
         vitest.expect(response.statusCode).toBe(404);
         const body = JSON.parse(response.payload);
-        vitest.expect(body.error.code).toBe("NOT_FOUND");
+        vitest.expect(body.error.code).toBe("ASSET_NOT_FOUND");
+        vitest.expect(body.error.nextStep).toBeDefined();
+        vitest.expect(body.error.requestId).toBeDefined();
     });
 
     vitest.it("serves spa fallback for non-api non-download routes", async function () {
@@ -1090,7 +1107,24 @@ vitest.describe("buildApp", function () {
 
         vitest.expect(response.statusCode).toBe(500);
         const body = JSON.parse(response.payload);
-        vitest.expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+        vitest.expect(body.error.code).toBe("INTERNAL_ERROR");
+        vitest.expect(body.error.message).toBe("Something went wrong on our side.");
+        // The thrown message is logged, never echoed: it can carry paths and private repo names.
+        vitest.expect(response.payload).not.toContain("boom");
+    });
+
+    vitest.it("preserves a typed ApiError raised by a route", async function () {
+        const mockRelease = services.release as unknown as MockReleaseService;
+        mockRelease.setTypedError(apiError.Errors.appNotFound());
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({ method: "GET", url: "/api/releases/app1" });
+
+        // The typed status survives the global handler instead of being flattened to 500.
+        vitest.expect(response.statusCode).toBe(404);
+        const body = JSON.parse(response.payload);
+        vitest.expect(body.error.code).toBe("APP_NOT_FOUND");
+        vitest.expect(body.error.nextStep).toBeDefined();
     });
 
     vitest.it("returns validation error details for invalid query params", async function () {
@@ -1100,8 +1134,8 @@ vitest.describe("buildApp", function () {
 
         vitest.expect(response.statusCode).toBe(400);
         const body = JSON.parse(response.payload);
-        vitest.expect(body.error.code).toBe("FST_ERR_VALIDATION");
-        vitest.expect(body.error.details).toBeDefined();
+        vitest.expect(body.error.code).toBe("BAD_REQUEST");
+        vitest.expect(body.error.nextStep).toBeDefined();
     });
 
     vitest.it("returns 404 when download asset is not found", async function () {
@@ -1114,7 +1148,9 @@ vitest.describe("buildApp", function () {
 
         vitest.expect(response.statusCode).toBe(404);
         const body = JSON.parse(response.payload);
-        vitest.expect(body.error.code).toBe("NOT_FOUND");
+        vitest.expect(body.error.code).toBe("ASSET_NOT_FOUND");
+        vitest.expect(body.error.nextStep).toBeDefined();
+        vitest.expect(body.error.requestId).toBeDefined();
     });
 
     vitest.it("returns live status", async function () {
