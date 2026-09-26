@@ -9,6 +9,7 @@ import * as rateLimit from "./plugins/rate-limit.js";
 import * as requestLogging from "./plugins/request-logging.js";
 import * as swagger from "./plugins/swagger.js";
 import * as staticFiles from "./plugins/static.js";
+import * as apiError from "./http/api-error.js";
 import * as healthRoutes from "./routes/health-routes.js";
 import * as appRoutes from "./routes/app-routes.js";
 import * as releaseRoutes from "./routes/release-routes.js";
@@ -50,24 +51,28 @@ export async function buildApp(services: Services): Promise<FastifyInstance> {
     await metricsRoute.registerMetricsRoute(app);
 
     app.setErrorHandler(function (error: FastifyError, request: FastifyRequest, reply: FastifyReply) {
+        const requestId = String(request.id);
+        const status = error.statusCode !== undefined ? error.statusCode : 500;
+        // A typed ApiError keeps its own status; anything else is mapped by status so Fastify's
+        // own 4xx stay 4xx, and every 5xx collapses to a generic message.
+        const reported =
+            error instanceof apiError.ApiError
+                ? error
+                : status >= 400 && status < 500
+                  ? apiError.fromStatus(status)
+                  : apiError.Errors.internal();
         services.logger.error("Request error", {
-            requestId: request.id,
+            requestId: requestId,
             method: request.method,
             url: request.url,
-            statusCode: error.statusCode,
-            code: error.code,
-            message: error.message
+            statusCode: reported.status,
+            code: reported.code,
+            // The full message and any validation detail stay server-side. Echoing them is what
+            // leaked absolute paths and private repository names to clients.
+            message: error.message,
+            validation: error.validation
         });
-        const statusCode = error.statusCode !== undefined ? error.statusCode : 500;
-        const code = error.code !== undefined ? error.code : "INTERNAL_SERVER_ERROR";
-        const errorPayload: Record<string, unknown> = {
-            code: code,
-            message: error.message
-        };
-        if (error.validation !== undefined && error.validation.length > 0) {
-            errorPayload.details = error.validation;
-        }
-        reply.status(statusCode).send({ error: errorPayload });
+        reply.status(reported.status).send(apiError.toClientError(reported, requestId));
     });
 
     app.setNotFoundHandler(function (request: FastifyRequest, reply: FastifyReply) {
@@ -81,12 +86,8 @@ export async function buildApp(services: Services): Promise<FastifyInstance> {
                 return;
             }
         }
-        reply.status(404).send({
-            error: {
-                code: "NOT_FOUND",
-                message: "Route not found"
-            }
-        });
+        const notFound = apiError.Errors.routeNotFound();
+        reply.status(notFound.status).send(apiError.toClientError(notFound, String(request.id)));
     });
 
     return app;
