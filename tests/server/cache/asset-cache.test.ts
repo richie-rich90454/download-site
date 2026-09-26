@@ -8,10 +8,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as stream from "node:stream";
 import * as undici from "undici";
+import Database from "better-sqlite3";
 import * as types from "../../../src/shared/types.js";
 import * as metrics from "../../../src/server/telemetry/metrics.js";
 import * as assetCache from "../../../src/server/cache/asset-cache.js";
-import { SilentLogger } from "../test-helpers.js";
+import { RecordingLogger, SilentLogger } from "../test-helpers.js";
 
 vi.mock("undici", function () {
     return {
@@ -594,5 +595,364 @@ describe("DiskAssetCacheService", function () {
 
         dateNowSpy.mockRestore();
         createWriteStreamSpy.mockRestore();
+    });
+
+    describe("O(1) hit validation", function () {
+        it("serves a cache hit without re-hashing the file when size and mtime are unchanged", async function () {
+            const data = Buffer.from("stable asset bytes");
+            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            vi.mocked(undici.request).mockResolvedValue(createResponse(data));
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+            await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            const readStreamSpy = vi.spyOn(fs, "createReadStream");
+            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            expect(result.cached).toBe(true);
+            // The whole point: a warm hit must not read the file at all. Any read stream here
+            // would mean we are back to O(file size) per request.
+            expect(readStreamSpy).not.toHaveBeenCalled();
+            expect(undici.request).toHaveBeenCalledTimes(1);
+            readStreamSpy.mockRestore();
+        });
+
+        it("re-verifies by hash when the file changed but the content is identical, then returns to O(1)", async function () {
+            const data = Buffer.from("rewritten but identical");
+            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            vi.mocked(undici.request).mockResolvedValue(createResponse(data));
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+            const first = await cache.getAssetPath("app1", "v1.0.0", asset);
+            expect(first.cached).toBe(false);
+
+            // Rewrite identical bytes: mtime moves, hash still matches, so the entry is kept
+            // and the new stat is adopted rather than triggering a re-download.
+            const future = new Date(Date.now() + 5000);
+            fs.writeFileSync(first.filePath, data);
+            fs.utimesSync(first.filePath, future, future);
+
+            const second = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            expect(second.cached).toBe(true);
+            expect(second.entry.checksum).toBe(first.entry.checksum);
+            expect(undici.request).toHaveBeenCalledTimes(1);
+
+            // And the adopted stat means the next read is O(1) again.
+            const readStreamSpy = vi.spyOn(fs, "createReadStream");
+            const third = await cache.getAssetPath("app1", "v1.0.0", asset);
+            expect(third.cached).toBe(true);
+            expect(readStreamSpy).not.toHaveBeenCalled();
+            readStreamSpy.mockRestore();
+        });
+
+        it("re-downloads when the file is deleted underneath a valid row", async function () {
+            const data1 = Buffer.from("first");
+            const data2 = Buffer.from("second payload");
+            const asset = createAsset("app.exe", data2.length, "http://example.com/app.exe");
+            vi.mocked(undici.request)
+                .mockResolvedValueOnce(createResponse(data1))
+                .mockResolvedValueOnce(createResponse(data2));
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+            const first = await cache.getAssetPath("app1", "v1.0.0", asset);
+            fs.unlinkSync(first.filePath);
+
+            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            expect(result.cached).toBe(false);
+            expect(fs.readFileSync(result.filePath).toString()).toBe("second payload");
+            expect(undici.request).toHaveBeenCalledTimes(2);
+        });
+
+        it("treats a file that cannot be read during verification as a miss", async function () {
+            const data = Buffer.from("payload");
+            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            vi.mocked(undici.request)
+                .mockResolvedValueOnce(createResponse(data))
+                .mockResolvedValueOnce(createResponse(data));
+            const recorder = new RecordingLogger();
+            cache = new assetCache.DiskAssetCacheService(tempDir, recorder, metricsService);
+            const first = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            // Force the stat to succeed and the subsequent hash read to fail.
+            const future = new Date(Date.now() + 5000);
+            fs.utimesSync(first.filePath, future, future);
+            const readStreamSpy = vi.spyOn(fs, "createReadStream").mockImplementation(function () {
+                const failing = new stream.Readable({
+                    read: function () {
+                        this.destroy(new Error("EIO simulated read failure"));
+                    }
+                });
+                return failing as unknown as fs.ReadStream;
+            });
+
+            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            expect(result.cached).toBe(false);
+            expect(undici.request).toHaveBeenCalledTimes(2);
+            expect(recorder.messages("warn")).toContain("Asset cache file unreadable during verification");
+            readStreamSpy.mockRestore();
+        });
+        it("handles a non-Error thrown while verifying a changed file", async function () {
+            const data = Buffer.from("payload");
+            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            vi.mocked(undici.request)
+                .mockResolvedValueOnce(createResponse(data))
+                .mockResolvedValueOnce(createResponse(data));
+            const recorder = new RecordingLogger();
+            cache = new assetCache.DiskAssetCacheService(tempDir, recorder, metricsService);
+            const first = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            const future = new Date(Date.now() + 5000);
+            fs.utimesSync(first.filePath, future, future);
+            const readStreamSpy = vi.spyOn(fs, "createReadStream").mockImplementation(function () {
+                const failing = new stream.Readable({
+                    read: function () {
+                        this.destroy("EIO as a bare string");
+                    }
+                });
+                return failing as unknown as fs.ReadStream;
+            });
+
+            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            expect(result.cached).toBe(false);
+            const warning = recorder.entries.filter(function (entry) {
+                return entry.message === "Asset cache file unreadable during verification";
+            });
+            expect(warning.length).toBe(1);
+            expect(warning[0].context !== undefined ? warning[0].context.error : undefined).toBe(
+                "EIO as a bare string"
+            );
+            readStreamSpy.mockRestore();
+        });
+    });
+
+    describe("path traversal hardening", function () {
+        it("refuses to cache an asset whose name is a reserved path segment", async function () {
+            const asset = createAsset("..", 3, "http://example.com/x");
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+            await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow("reserved path name");
+        });
+
+        it("refuses a dot asset name", async function () {
+            const asset = createAsset(".", 3, "http://example.com/x");
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+            await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow("reserved path name");
+        });
+
+        it("keeps distinct raw names that sanitise to the same string in separate files", async function () {
+            const data1 = Buffer.from("one");
+            const data2 = Buffer.from("two");
+            const assetA = createAsset("release/1.0", data1.length, "http://example.com/a");
+            const assetB = createAsset("release_1.0", data2.length, "http://example.com/b");
+            vi.mocked(undici.request)
+                .mockResolvedValueOnce(createResponse(data1))
+                .mockResolvedValueOnce(createResponse(data2));
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+            const first = await cache.getAssetPath("app1", "v1.0.0", assetA);
+            const second = await cache.getAssetPath("app1", "v1.0.0", assetB);
+
+            // Both sanitise to release_1.0, so only a digest suffix keeps them from colliding.
+            expect(first.filePath).not.toBe(second.filePath);
+            expect(fs.readFileSync(first.filePath).toString()).toBe("one");
+            expect(fs.readFileSync(second.filePath).toString()).toBe("two");
+        });
+
+        it("refuses a version tag that sanitises to a reserved segment", async function () {
+            const asset = createAsset("app.exe", 3, "http://example.com/x");
+            cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+            await expect(cache.getAssetPath("app1", "..", asset)).rejects.toThrow("reserved path name");
+        });
+    });
+
+    it("runs the database in WAL mode so readers are not blocked by a writer", function () {
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        const dbPath = path.join(tempDir, "assets.db");
+        const raw = new Database(dbPath, { readonly: true });
+        const mode = raw.pragma("journal_mode", { simple: true });
+        raw.close();
+
+        expect(String(mode).toLowerCase()).toBe("wal");
+    });
+
+    it("migrates a database created before the stat columns existed", function () {
+        // Build a database with exactly the pre-migration shape.
+        const dbPath = path.join(tempDir, "assets.db");
+        const legacy = new Database(dbPath);
+        legacy.exec(`
+            CREATE TABLE asset_cache (
+                app TEXT NOT NULL,
+                version TEXT NOT NULL,
+                asset_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                checksum TEXT NOT NULL,
+                last_accessed_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (app, version, asset_name)
+            );
+        `);
+        const legacyColumns = legacy.pragma("table_info(asset_cache)") as { name: string }[];
+        legacy.close();
+        expect(
+            legacyColumns.map(function (c) {
+                return c.name;
+            })
+        ).not.toContain("size_on_disk");
+
+        // Constructing the service must add the columns without losing the existing rows.
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        cache.close();
+
+        const verify = new Database(dbPath, { readonly: true });
+        const columns = verify.pragma("table_info(asset_cache)") as { name: string }[];
+        verify.close();
+        const names = columns.map(function (c) {
+            return c.name;
+        });
+        expect(names).toContain("size_on_disk");
+        expect(names).toContain("mtime_ms");
+    });
+
+    it("reports cache stats from memoised counters in O(1)", async function () {
+        const data = Buffer.from("counted bytes");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        expect(cache.getStats()).toEqual({ totalSize: 0, totalCount: 0 });
+
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        const afterDownload = cache.getStats();
+        expect(afterDownload.totalCount).toBe(1);
+
+        // Repeated reads are served from the memo, and a returned copy cannot corrupt it.
+        const again = cache.getStats();
+        expect(again).toEqual(afterDownload);
+        again.totalCount = 999;
+        expect(cache.getStats().totalCount).toBe(1);
+    });
+
+    it("invalidates memoised stats after a purge", async function () {
+        const data = Buffer.from("purge me");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        expect(cache.getStats().totalCount).toBe(1);
+
+        cache.purge("app1", "v1.0.0");
+
+        expect(cache.getStats().totalCount).toBe(0);
+    });
+
+    it("rejects an asset name that would resolve outside its cache directory", function () {
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        const internals = cache as unknown as {
+            assertDirectChild: (parent: string, target: string) => void;
+            assertInsideCacheRoot: (target: string) => void;
+        };
+        const dir = path.join(tempDir, "assets", "app1", "v1.0.0");
+
+        // Bypasses the sanitiser to prove the containment invariant stands on its own, so a
+        // future change to the character filter cannot silently reopen the traversal class.
+        expect(function () {
+            internals.assertDirectChild(dir, path.join(dir, "..", "escaped"));
+        }).toThrow("outside the cache directory");
+        expect(function () {
+            internals.assertDirectChild(dir, path.join(dir, "nested", "deeper"));
+        }).toThrow("outside the cache directory");
+        expect(function () {
+            internals.assertDirectChild(dir, path.join(dir, "fine.exe"));
+        }).not.toThrow();
+
+        expect(function () {
+            internals.assertInsideCacheRoot(path.join(tempDir, "assets", "app1", "v1.0.0"));
+        }).not.toThrow();
+        expect(function () {
+            internals.assertInsideCacheRoot(path.join(tempDir, "elsewhere"));
+        }).toThrow("outside the cache directory");
+    });
+
+    describe("isInsideDir", function () {
+        it("accepts a directory and its descendants", function () {
+            const root = path.resolve(path.sep + "srv" + path.sep + "cache");
+            expect(assetCache.isInsideDir(root, root)).toBe(true);
+            expect(assetCache.isInsideDir(root, path.join(root, "app", "v1", "a.exe"))).toBe(true);
+        });
+
+        it("rejects siblings that merely share a name prefix", function () {
+            const root = path.resolve(path.sep + "srv" + path.sep + "cache");
+            expect(assetCache.isInsideDir(root, path.resolve(path.sep + "srv" + path.sep + "cache-evil"))).toBe(false);
+        });
+
+        it("rejects traversal above the root", function () {
+            const root = path.resolve(path.sep + "srv" + path.sep + "cache");
+            expect(assetCache.isInsideDir(root, path.join(root, "..", "..", "etc", "passwd"))).toBe(false);
+            expect(assetCache.isInsideDir(root, path.resolve(path.sep + "etc" + path.sep + "passwd"))).toBe(false);
+        });
+
+        it("handles a parent that is already a filesystem root", function () {
+            const fsRoot = path.parse(process.cwd()).root;
+            expect(fsRoot.endsWith(path.sep)).toBe(true);
+            expect(assetCache.isInsideDir(fsRoot, path.join(fsRoot, "srv", "cache"))).toBe(true);
+            expect(assetCache.isInsideDir(fsRoot, fsRoot)).toBe(true);
+        });
+    });
+
+    it("backfills size and mtime for rows written before those columns existed", async function () {
+        const data = Buffer.from("legacy row");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        cache.close();
+
+        // Simulate a pre-migration row: columns present but left at the sentinel.
+        const dbPath = path.join(tempDir, "assets.db");
+        const raw = new Database(dbPath);
+        raw.prepare("UPDATE asset_cache SET size_on_disk = 0, mtime_ms = 0").run();
+        raw.close();
+
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        const verify = new Database(dbPath, { readonly: true });
+        const row = verify.prepare("SELECT size_on_disk, mtime_ms FROM asset_cache").get() as {
+            size_on_disk: number;
+            mtime_ms: number;
+        };
+        verify.close();
+
+        expect(row.size_on_disk).toBe(data.length);
+        expect(row.mtime_ms).toBeGreaterThan(0);
+    });
+
+    it("skips unreadable files during the stat backfill and leaves the sentinel in place", async function () {
+        const data = Buffer.from("row with a vanished file");
+        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        await cache.getAssetPath("app1", "v1.0.0", asset);
+        cache.close();
+
+        const dbPath = path.join(tempDir, "assets.db");
+        const raw = new Database(dbPath);
+        raw.prepare("UPDATE asset_cache SET size_on_disk = 0, mtime_ms = 0").run();
+        raw.prepare("UPDATE asset_cache SET file_path = ?").run(path.join(tempDir, "assets", "gone", "nope"));
+        raw.close();
+
+        // Must not throw: an unreadable path is logged and skipped, the row stays flagged for
+        // slow re-verification on next read rather than being deleted.
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        cache.close();
+
+        const verify = new Database(dbPath, { readonly: true });
+        const row = verify.prepare("SELECT size_on_disk FROM asset_cache").get() as { size_on_disk: number };
+        verify.close();
+
+        expect(row.size_on_disk).toBe(0);
     });
 });
