@@ -156,7 +156,9 @@ describe("DownloadService", function () {
     });
 
     it("throws when release not found", async function () {
-        await expect(service.resolveAsset("app1", {})).rejects.toThrow("Release not found for app app1");
+        await expect(service.resolveAsset("app1", {})).rejects.toThrow(
+            "That version of this app isn't published here."
+        );
     });
 
     it("throws when no matching asset", async function () {
@@ -165,7 +167,7 @@ describe("DownloadService", function () {
         releaseSvc.addRelease(release);
 
         await expect(service.resolveAsset("app1", { userAgent: "Windows" })).rejects.toThrow(
-            "No matching asset found for app app1"
+            "This release has no file for the platform you're using."
         );
     });
 
@@ -174,7 +176,7 @@ describe("DownloadService", function () {
         releaseSvc.addRelease(release);
 
         await expect(service.resolveAsset("app1", { version: "v1.0.0", assetName: "missing.exe" })).rejects.toThrow(
-            "No matching asset found for app app1"
+            "This release has no file for the platform you're using."
         );
     });
 
@@ -549,7 +551,7 @@ describe("DownloadService", function () {
 
         const result = await proxyRequestServer(asset, release);
 
-        expect(result.statusCode).toBe(404);
+        expect(result.statusCode).toBe(502);
     });
 
     it("returns 502 when proxy download fetch fails", async function () {
@@ -616,14 +618,74 @@ describe("DownloadService", function () {
             }
         };
 
-        await service.proxyDownload("app1", asset, release, reply as unknown as import("fastify").FastifyReply);
+        await service.proxyDownload(
+            "app1",
+            asset,
+            release,
+            reply as unknown as import("fastify").FastifyReply,
+            undefined,
+            "req-upstream-404"
+        );
 
-        expect(raw.statusCode).toBe(404);
+        // The upstream 404 is deliberately not echoed: GitHub returns 404 for a private
+        // repository too, so passing it through would confirm whether one exists.
+        expect(raw.statusCode).toBe(502);
         expect(sendPayload).toEqual({
-            error: { code: "PROXY_ERROR", message: "Upstream download returned status 404" }
+            error: {
+                code: "UPSTREAM_UNAVAILABLE",
+                message: "We couldn't reach GitHub to complete that request.",
+                nextStep: expect.any(String),
+                requestId: "req-upstream-404"
+            }
         });
     });
 
+    it("falls back to an unknown request id when none is supplied", async function () {
+        const asset: types.Asset = {
+            name: "app.exe",
+            size: 100,
+            contentType: "application/octet-stream",
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
+        };
+        const release: types.Release = {
+            tag: "v1.0.0",
+            name: "Release v1.0.0",
+            notes: "Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: [asset]
+        };
+        vi.mocked(undici.request).mockRejectedValueOnce(new Error("network error"));
+        const raw = new http.ServerResponse({ method: "GET", url: "/" } as http.IncomingMessage);
+        let sendPayload: unknown;
+        const reply = {
+            hijack: function (): void {
+                // no-op
+            },
+            raw: raw,
+            status: function (code: number) {
+                raw.statusCode = code;
+                return this;
+            },
+            send: function (payload: unknown) {
+                sendPayload = payload;
+                return this;
+            }
+        };
+
+        // No requestId argument: the raw-ServerResponse path has no Fastify request to read one from.
+        await service.proxyDownload("app1", asset, release, reply as unknown as FastifyReply);
+
+        expect(sendPayload).toEqual({
+            error: {
+                code: "UPSTREAM_UNAVAILABLE",
+                message: "We couldn't reach GitHub to complete that request.",
+                nextStep: expect.any(String),
+                requestId: "unknown"
+            }
+        });
+    });
     it("returns 502 via Fastify reply when proxy download fetch fails", async function () {
         const asset: types.Asset = {
             name: "app.exe",
@@ -660,10 +722,24 @@ describe("DownloadService", function () {
             }
         };
 
-        await service.proxyDownload("app1", asset, release, reply as unknown as import("fastify").FastifyReply);
+        await service.proxyDownload(
+            "app1",
+            asset,
+            release,
+            reply as unknown as import("fastify").FastifyReply,
+            undefined,
+            "req-network-error"
+        );
 
         expect(raw.statusCode).toBe(502);
-        expect(sendPayload).toEqual({ error: { code: "PROXY_ERROR", message: "network error" } });
+        expect(sendPayload).toEqual({
+            error: {
+                code: "UPSTREAM_UNAVAILABLE",
+                message: "We couldn't reach GitHub to complete that request.",
+                nextStep: expect.any(String),
+                requestId: expect.any(String)
+            }
+        });
     });
 
     it("follows redirect during proxy download", async function () {
@@ -843,7 +919,12 @@ describe("DownloadService", function () {
 
         expect(raw.statusCode).toBe(502);
         expect(sendPayload).toEqual({
-            error: { code: "PROXY_ERROR", message: "Upstream download returned status 502" }
+            error: {
+                code: "UPSTREAM_UNAVAILABLE",
+                message: "We couldn't reach GitHub to complete that request.",
+                nextStep: expect.any(String),
+                requestId: expect.any(String)
+            }
         });
     });
 
@@ -1087,6 +1168,13 @@ describe("DownloadService", function () {
         await service.proxyDownload("app1", asset, release, reply as unknown as import("fastify").FastifyReply);
 
         expect(raw.statusCode).toBe(502);
-        expect(sendPayload).toEqual({ error: { code: "PROXY_ERROR", message: "string failure" } });
+        expect(sendPayload).toEqual({
+            error: {
+                code: "UPSTREAM_UNAVAILABLE",
+                message: "We couldn't reach GitHub to complete that request.",
+                nextStep: expect.any(String),
+                requestId: expect.any(String)
+            }
+        });
     });
 });
