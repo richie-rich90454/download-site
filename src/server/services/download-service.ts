@@ -9,6 +9,7 @@ import * as platform from "../platform/platform-detector.js";
 import * as release from "./release-service.js";
 import * as metrics from "../telemetry/metrics.js";
 import * as logger from "../logging/logger.js";
+import * as apiError from "../http/api-error.js";
 import * as egress from "../http/egress.js";
 
 type ReplyLike = FastifyReply | http.ServerResponse;
@@ -79,7 +80,7 @@ export class DownloadService {
             releaseObj = await this.releaseService.getReleaseByTag(appId, version);
         }
         if (releaseObj === undefined) {
-            throw new Error("Release not found for app " + appId);
+            throw apiError.Errors.releaseNotFound();
         }
         let asset: types.Asset | undefined;
         if (options.assetName !== undefined && options.assetName.length > 0) {
@@ -89,7 +90,7 @@ export class DownloadService {
             asset = this.detector.selectAsset(releaseObj.assets, target);
         }
         if (asset === undefined) {
-            throw new Error("No matching asset found for app " + appId);
+            throw apiError.Errors.assetNotFound();
         }
         const maxCacheableSize = this.limits.maxCacheableSize as number;
         if (asset.size > maxCacheableSize) {
@@ -177,7 +178,8 @@ export class DownloadService {
         asset: types.Asset,
         release: types.Release,
         reply: ReplyLike,
-        rangeHeader?: string
+        rangeHeader?: string,
+        requestId?: string
     ): Promise<void> {
         const url = asset.browserDownloadUrl;
         const requestHeaders: Record<string, string> = {};
@@ -188,16 +190,21 @@ export class DownloadService {
         try {
             const response = await this.fetchAsset(url, controller.signal, requestHeaders);
             if (response.statusCode < 200 || response.statusCode >= 300 || response.body === null) {
-                const status = response.statusCode < 200 || response.statusCode >= 300 ? response.statusCode : 502;
                 if (isFastifyReply(reply)) {
-                    reply.status(status).send({
-                        error: {
-                            code: "PROXY_ERROR",
-                            message: "Upstream download returned status " + status
-                        }
+                    // The upstream status is logged, not returned: a 404 from GitHub can mean a
+                    // private repository, which would otherwise confirm its existence.
+                    this.logger.warn("Upstream asset request rejected", {
+                        app: appId,
+                        version: release.tag,
+                        asset: asset.name,
+                        upstreamStatus: response.statusCode
                     });
+                    const upstream = apiError.Errors.upstreamUnavailable();
+                    reply
+                        .status(upstream.status)
+                        .send(apiError.toClientError(upstream, requestId !== undefined ? requestId : "unknown"));
                 } else {
-                    reply.statusCode = status;
+                    reply.statusCode = 502;
                     reply.end();
                 }
                 return;
@@ -256,12 +263,11 @@ export class DownloadService {
                 error: message
             });
             if (isFastifyReply(reply)) {
-                reply.status(502).send({
-                    error: {
-                        code: "PROXY_ERROR",
-                        message: message
-                    }
-                });
+                // The underlying error can name internal hosts, so it is logged and dropped.
+                const upstream = apiError.Errors.upstreamUnavailable();
+                reply
+                    .status(upstream.status)
+                    .send(apiError.toClientError(upstream, requestId !== undefined ? requestId : "unknown"));
             } else {
                 reply.statusCode = 502;
                 reply.end();
