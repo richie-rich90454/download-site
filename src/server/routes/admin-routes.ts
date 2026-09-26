@@ -54,7 +54,7 @@ interface AssetRedownloadBody {
 
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const services = app.services;
-    const adminKey = process.env.ADMIN_API_KEY;
+    const adminKey = services.config.adminApiKey;
     const auth = apiKeyAuth.buildApiKeyAuth({ apiKey: adminKey, logger: services.logger });
 
     app.post(
