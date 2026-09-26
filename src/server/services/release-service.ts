@@ -6,6 +6,7 @@ import * as assetCache from "../cache/asset-cache.js";
 import * as platform from "../platform/platform-detector.js";
 import * as health from "../health/health-service.js";
 import * as logger from "../logging/logger.js";
+import * as apiError from "../http/api-error.js";
 
 export interface ReleaseFilters {
     page?: number;
@@ -183,7 +184,7 @@ export class ReleaseService {
                 return this.cfg.apps[i];
             }
         }
-        throw new Error("App not found: " + appId);
+        throw apiError.Errors.appNotFound();
     }
 
     private transformReleases(appId: string, githubReleases: types.GitHubRelease[]): types.Release[] {
