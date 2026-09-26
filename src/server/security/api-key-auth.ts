@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { Logger } from "../logging/logger.js";
+import { safeSecretEqual } from "./secret-compare.js";
 
 export interface ApiKeyAuthOptions {
     apiKey: string | undefined;
@@ -36,7 +37,7 @@ export function buildApiKeyAuth(options: ApiKeyAuthOptions) {
             });
             return;
         }
-        if (providedKey !== options.apiKey) {
+        if (!safeSecretEqual(providedKey, options.apiKey)) {
             options.logger.warn("Admin request invalid API key", {
                 path: request.url,
                 method: request.method
