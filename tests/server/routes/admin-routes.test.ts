@@ -92,12 +92,13 @@ describe("registerAdminRoutes", function () {
         };
     });
 
-    function buildServices() {
+    function buildServices(adminKey?: string) {
         return {
             release: release,
             metadataCache: metadataCache,
             assetCache: assetCache,
-            logger: new SilentLogger()
+            logger: new SilentLogger(),
+            config: { adminApiKey: adminKey }
         } as unknown as Services;
     }
 
