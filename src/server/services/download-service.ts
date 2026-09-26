@@ -9,6 +9,7 @@ import * as platform from "../platform/platform-detector.js";
 import * as release from "./release-service.js";
 import * as metrics from "../telemetry/metrics.js";
 import * as logger from "../logging/logger.js";
+import * as egress from "../http/egress.js";
 
 type ReplyLike = FastifyReply | http.ServerResponse;
 
@@ -184,11 +185,8 @@ export class DownloadService {
             requestHeaders.Range = rangeHeader;
         }
         const controller = new AbortController();
-        const timeout = setTimeout(function () {
-            controller.abort();
-        }, 300000);
         try {
-            const response = await this.fetchAsset(url, controller.signal, undefined, requestHeaders);
+            const response = await this.fetchAsset(url, controller.signal, requestHeaders);
             if (response.statusCode < 200 || response.statusCode >= 300 || response.body === null) {
                 const status = response.statusCode < 200 || response.statusCode >= 300 ? response.statusCode : 502;
                 if (isFastifyReply(reply)) {
@@ -269,7 +267,7 @@ export class DownloadService {
                 reply.end();
             }
         } finally {
-            clearTimeout(timeout);
+            // The timeout is owned by the shared egress client, which aborts the same signal.
         }
     }
 
@@ -288,25 +286,9 @@ export class DownloadService {
     private async fetchAsset(
         url: string,
         signal: AbortSignal,
-        redirects?: number,
         headers?: Record<string, string>
-    ): Promise<Awaited<ReturnType<typeof undici.request>>> {
-        const redirectCount = redirects === undefined ? 0 : redirects;
-        const response = await undici.request(url, {
-            method: "GET",
-            signal: signal,
-            headers: headers
-        });
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location !== undefined) {
-            if (redirectCount >= 5) {
-                throw new Error("Asset download redirect limit exceeded");
-            }
-            const location = Array.isArray(response.headers.location)
-                ? response.headers.location[0]
-                : response.headers.location;
-            return this.fetchAsset(location, signal, redirectCount + 1, headers);
-        }
-        return response;
+    ): Promise<undici.Dispatcher.ResponseData> {
+        return egress.requestAsset(url, { signal: signal, headers: headers });
     }
 
     private findAssetByName(assets: types.Asset[], name: string): types.Asset | undefined {
