@@ -15,7 +15,12 @@ import { SilentLogger } from "../test-helpers.js";
 
 vi.mock("undici", function () {
     return {
-        request: vi.fn()
+        request: vi.fn(),
+        Agent: class {
+            close(): Promise<void> {
+                return Promise.resolve();
+            }
+        }
     };
 });
 
@@ -85,15 +90,15 @@ function createRelease(tag: string): types.Release {
                 name: "app-windows.exe",
                 size: 100,
                 contentType: "application/octet-stream",
-                url: "http://example.com/app-windows.exe",
-                browserDownloadUrl: "http://example.com/app-windows.exe"
+                url: "https://github.com/app-windows.exe",
+                browserDownloadUrl: "https://github.com/app-windows.exe"
             },
             {
                 name: "app-macos.dmg",
                 size: 100,
                 contentType: "application/x-apple-diskimage",
-                url: "http://example.com/app-macos.dmg",
-                browserDownloadUrl: "http://example.com/app-macos.dmg"
+                url: "https://github.com/app-macos.dmg",
+                browserDownloadUrl: "https://github.com/app-macos.dmg"
             }
         ]
     };
@@ -465,8 +470,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/vnd.microsoft.portable-executable",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -495,8 +500,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -525,8 +530,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -552,8 +557,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -576,8 +581,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -624,8 +629,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -667,8 +672,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -681,7 +686,7 @@ describe("DownloadService", function () {
         vi.mocked(undici.request)
             .mockResolvedValueOnce({
                 statusCode: 302,
-                headers: { location: "http://example.com/redirected.exe" },
+                headers: { location: "https://github.com/redirected.exe" },
                 body: null
             } as unknown as Awaited<ReturnType<typeof undici.request>>)
             .mockResolvedValueOnce(createProxyResponse(data, 200, { "content-length": String(data.length) }));
@@ -698,8 +703,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -712,7 +717,7 @@ describe("DownloadService", function () {
         vi.mocked(undici.request)
             .mockResolvedValueOnce({
                 statusCode: 301,
-                headers: { location: ["http://example.com/redirected.exe"] },
+                headers: { location: ["https://github.com/redirected.exe"] },
                 body: null
             } as unknown as Awaited<ReturnType<typeof undici.request>>)
             .mockResolvedValueOnce(createProxyResponse(data, 200, { "content-length": String(data.length) }));
@@ -728,8 +733,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -741,7 +746,7 @@ describe("DownloadService", function () {
         };
         vi.mocked(undici.request).mockResolvedValue({
             statusCode: 302,
-            headers: { location: "http://example.com/redirect.exe" },
+            headers: { location: "https://github.com/redirect.exe" },
             body: null
         } as unknown as Awaited<ReturnType<typeof undici.request>>);
 
@@ -757,8 +762,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -800,8 +805,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -847,8 +852,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -900,8 +905,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -957,8 +962,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -983,8 +988,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
@@ -1049,8 +1054,8 @@ describe("DownloadService", function () {
             name: "app.exe",
             size: 100,
             contentType: "application/octet-stream",
-            url: "http://example.com/app.exe",
-            browserDownloadUrl: "http://example.com/app.exe"
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
         };
         const release: types.Release = {
             tag: "v1.0.0",
