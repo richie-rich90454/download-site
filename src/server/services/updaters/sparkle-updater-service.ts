@@ -79,7 +79,7 @@ export class SparkleUpdaterService {
             this.escapeXml(releaseObj.name) +
             "</title>\n" +
             "<description><![CDATA[" +
-            releaseObj.notes +
+            this.wrapCdata(releaseObj.notes) +
             "]]></description>\n" +
             "<pubDate>" +
             this.escapeXml(pubDate) +
@@ -102,6 +102,18 @@ export class SparkleUpdaterService {
             return "";
         }
         return helpers.readSignature(sigAsset, this.assetCache, appId, version);
+    }
+
+    /**
+     * Release notes are attacker-controlled whenever a mirrored repo is not ours: whoever
+     * can edit the release body can edit the appcast. A literal `]]>` closes the CDATA
+     * section early, letting the rest of the body inject sibling elements - including an
+     * `<enclosure>` pointing at an attacker-chosen binary, which Sparkle will offer to
+     * install. Re-open a new section in place of every terminator so the payload stays
+     * inert text.
+     */
+    private wrapCdata(input: string): string {
+        return input.replace(/\]\]>/g, "]]]]><![CDATA[>");
     }
 
     private escapeXml(input: string): string {
