@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import * as downloadRoutes from "../../../src/server/routes/download-routes.js";
 import type { Services } from "../../../src/server/container.js";
 import { SilentLogger } from "../test-helpers.js";
+import * as apiError from "../../../src/server/http/api-error.js";
 
 interface RouteRegistration {
     method: string;
@@ -31,7 +32,8 @@ function createRequest(
         params: params,
         query: query,
         headers: headers,
-        body: undefined
+        body: undefined,
+        id: "req-1"
     } as unknown as FastifyRequest;
 }
 
@@ -129,18 +131,18 @@ vitest.describe("registerDownloadRoutes", function () {
 
         vitest
             .expect(downloadService.proxyDownload)
-            .toHaveBeenCalledWith("app1", result.asset, result.release, replyResult.reply, "bytes=0-99");
+            .toHaveBeenCalledWith("app1", result.asset, result.release, replyResult.reply, "bytes=0-99", "req-1");
         vitest.expect(downloadService.serveFile).not.toHaveBeenCalled();
     });
 
-    vitest.it("returns 404 when resolveAsset throws a non-Error value", async function () {
+    vitest.it("returns a safe 500 when resolveAsset throws a non-Error value", async function () {
         const servicesResult = buildServices();
         const services = servicesResult.services;
         const downloadService = servicesResult.downloadService;
         const context = createFakeApp(services);
         await downloadRoutes.registerDownloadRoutes(context.app);
         const handler = context.routes[0].handler as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-        downloadService.resolveAsset.mockRejectedValue("asset missing");
+        downloadService.resolveAsset.mockRejectedValue("/srv/secret/path leaked to the client");
 
         const request = createRequest(
             { app: "app1" },
@@ -151,11 +153,20 @@ vitest.describe("registerDownloadRoutes", function () {
 
         await handler(request, replyResult.reply as unknown as FastifyReply);
 
-        vitest.expect(replyResult.statusCode.value).toBe(404);
-        vitest.expect(replyResult.payload.value).toEqual({ error: { code: "NOT_FOUND", message: "asset missing" } });
+        vitest.expect(replyResult.statusCode.value).toBe(500);
+        vitest.expect(replyResult.payload.value).toEqual({
+            error: {
+                code: "INTERNAL_ERROR",
+                message: "Something went wrong on our side.",
+                nextStep: vitest.expect.any(String),
+                requestId: "req-1"
+            }
+        });
+        // The thrown value must not survive anywhere in the response.
+        vitest.expect(JSON.stringify(replyResult.payload.value)).not.toContain("/srv/secret/path");
     });
 
-    vitest.it("returns 404 when resolved asset has no file path and is not proxied", async function () {
+    vitest.it("returns a safe 500 when a resolved asset has no file path and is not proxied", async function () {
         const servicesResult = buildServices();
         const services = servicesResult.services;
         const downloadService = servicesResult.downloadService;
@@ -173,9 +184,40 @@ vitest.describe("registerDownloadRoutes", function () {
 
         await handler(request, replyResult.reply as unknown as FastifyReply);
 
+        vitest.expect(replyResult.statusCode.value).toBe(500);
+        vitest.expect(replyResult.payload.value).toEqual({
+            error: {
+                code: "INTERNAL_ERROR",
+                message: "Something went wrong on our side.",
+                nextStep: vitest.expect.any(String),
+                requestId: "req-1"
+            }
+        });
+        vitest.expect(JSON.stringify(replyResult.payload.value)).not.toContain("no file path");
+    });
+
+    vitest.it("preserves a typed ApiError status instead of flattening everything to 404", async function () {
+        const servicesResult = buildServices();
+        const services = servicesResult.services;
+        const downloadService = servicesResult.downloadService;
+        const context = createFakeApp(services);
+        await downloadRoutes.registerDownloadRoutes(context.app);
+        const handler = context.routes[0].handler as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+        downloadService.resolveAsset.mockRejectedValue(apiError.Errors.assetNotFound());
+
+        const request = createRequest({ app: "app1" }, {}, {});
+        const replyResult = createReply();
+
+        await handler(request, replyResult.reply as unknown as FastifyReply);
+
         vitest.expect(replyResult.statusCode.value).toBe(404);
         vitest.expect(replyResult.payload.value).toEqual({
-            error: { code: "NOT_FOUND", message: "Resolved asset has no file path and is not proxied" }
+            error: {
+                code: "ASSET_NOT_FOUND",
+                message: "This release has no file for the platform you're using.",
+                nextStep: vitest.expect.any(String),
+                requestId: "req-1"
+            }
         });
     });
 });
