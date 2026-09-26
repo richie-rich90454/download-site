@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { Logger } from "../logging/logger.js";
+import { safeSecretEqual } from "./secret-compare.js";
 
 export interface WebhookVerifierOptions {
     secret: string | undefined;
@@ -45,16 +46,7 @@ export function buildWebhookVerifier(options: WebhookVerifierOptions) {
             payload = JSON.stringify(body);
         }
         const expected = "sha256=" + crypto.createHmac("sha256", options.secret).update(payload).digest("hex");
-        const provided = signature;
-        let match = false;
-        if (provided.length === expected.length) {
-            let diff = 0;
-            for (let i = 0; i < provided.length; i = i + 1) {
-                diff = diff | (provided.charCodeAt(i) ^ expected.charCodeAt(i));
-            }
-            match = diff === 0;
-        }
-        if (!match) {
+        if (!safeSecretEqual(signature, expected)) {
             options.logger.warn("Webhook request invalid signature", {
                 path: request.url
             });
