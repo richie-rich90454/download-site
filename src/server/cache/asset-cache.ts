@@ -1,11 +1,11 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as undici from "undici";
 import Database from "better-sqlite3";
 import * as types from "../../shared/types.js";
 import * as logger from "../logging/logger.js";
 import * as metrics from "../telemetry/metrics.js";
+import * as egress from "../http/egress.js";
 
 export interface AssetCacheService {
     getAssetPath(app: string, version: string, asset: types.Asset): Promise<AssetCacheResult>;
@@ -439,11 +439,8 @@ export class DiskAssetCacheService implements AssetCacheService {
         const url = asset.browserDownloadUrl;
         this.logger.info("Downloading asset", { app: app, version: version, asset: asset.name, url: url });
         const controller = new AbortController();
-        const timeout = setTimeout(function () {
-            controller.abort();
-        }, 300000);
         try {
-            const response = await this.fetchAsset(url, controller.signal);
+            const response = await egress.requestAsset(url, { signal: controller.signal });
             if (response.statusCode < 200 || response.statusCode >= 300) {
                 throw new Error("Asset download failed with status " + response.statusCode);
             }
@@ -517,7 +514,6 @@ export class DiskAssetCacheService implements AssetCacheService {
                 }
             };
         } finally {
-            clearTimeout(timeout);
             if (fs.existsSync(tempPath)) {
                 try {
                     fs.unlinkSync(tempPath);
@@ -526,28 +522,6 @@ export class DiskAssetCacheService implements AssetCacheService {
                 }
             }
         }
-    }
-
-    private async fetchAsset(
-        url: string,
-        signal: AbortSignal,
-        redirects?: number
-    ): Promise<Awaited<ReturnType<typeof undici.request>>> {
-        const redirectCount = redirects === undefined ? 0 : redirects;
-        const response = await undici.request(url, {
-            method: "GET",
-            signal: signal
-        });
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location !== undefined) {
-            if (redirectCount >= 5) {
-                throw new Error("Asset download redirect limit exceeded");
-            }
-            const location = Array.isArray(response.headers.location)
-                ? response.headers.location[0]
-                : response.headers.location;
-            return this.fetchAsset(location, signal, redirectCount + 1);
-        }
-        return response;
     }
 
     /**
