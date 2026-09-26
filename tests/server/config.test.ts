@@ -12,6 +12,8 @@ describe("loadConfig", function () {
     const originalConfigPath = process.env.CONFIG_PATH;
     const originalGithubToken = process.env.GITHUB_TOKEN;
     const originalMaxCacheableSize = process.env.MAX_CACHEABLE_SIZE;
+    const originalAdminApiKey = process.env.ADMIN_API_KEY;
+    const originalWebhookSecret = process.env.WEBHOOK_SECRET;
 
     beforeEach(function () {
         delete process.env.PORT;
@@ -21,6 +23,10 @@ describe("loadConfig", function () {
         delete process.env.CONFIG_PATH;
         delete process.env.GITHUB_TOKEN;
         delete process.env.MAX_CACHEABLE_SIZE;
+        // The real .env is loaded by dotenv at import time; clear the secrets so each case
+        // starts from a known state rather than inheriting a developer's local values.
+        delete process.env.ADMIN_API_KEY;
+        delete process.env.WEBHOOK_SECRET;
     });
 
     afterEach(function () {
@@ -31,6 +37,16 @@ describe("loadConfig", function () {
         process.env.CONFIG_PATH = originalConfigPath;
         process.env.GITHUB_TOKEN = originalGithubToken;
         process.env.MAX_CACHEABLE_SIZE = originalMaxCacheableSize;
+        if (originalAdminApiKey === undefined) {
+            delete process.env.ADMIN_API_KEY;
+        } else {
+            process.env.ADMIN_API_KEY = originalAdminApiKey;
+        }
+        if (originalWebhookSecret === undefined) {
+            delete process.env.WEBHOOK_SECRET;
+        } else {
+            process.env.WEBHOOK_SECRET = originalWebhookSecret;
+        }
     });
 
     it("loads required configuration", function () {
@@ -46,6 +62,52 @@ describe("loadConfig", function () {
         expect(cfg.logLevel).toBe("debug");
         expect(cfg.apps.length).toBe(1);
         expect(cfg.apps[0].id).toBe("app1");
+    });
+
+    it("exposes the admin and webhook secrets on the config", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        process.env.ADMIN_API_KEY = "a-sufficiently-long-admin-key-value";
+        process.env.WEBHOOK_SECRET = "a-sufficiently-long-webhook-secret";
+
+        const cfg = config.loadConfig();
+
+        expect(cfg.adminApiKey).toBe("a-sufficiently-long-admin-key-value");
+        expect(cfg.webhookSecret).toBe("a-sufficiently-long-webhook-secret");
+    });
+
+    it("leaves the secrets undefined when unset, which disables those surfaces", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+
+        const cfg = config.loadConfig();
+
+        expect(cfg.adminApiKey).toBeUndefined();
+        expect(cfg.webhookSecret).toBeUndefined();
+    });
+
+    it("refuses to start when the admin key is shorter than the minimum", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        process.env.ADMIN_API_KEY = "short";
+
+        expect(function () {
+            config.loadConfig();
+        }).toThrow("ADMIN_API_KEY is set but shorter than 32 characters");
+    });
+
+    it("refuses to start when the webhook secret is shorter than the minimum", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        process.env.WEBHOOK_SECRET = "short";
+
+        expect(function () {
+            config.loadConfig();
+        }).toThrow("WEBHOOK_SECRET is set but shorter than 32 characters");
     });
 
     it("defaults log level to info", function () {
