@@ -337,7 +337,9 @@ describe("ReleaseService", function () {
     });
 
     it("throws for unknown app", async function () {
-        await expect(service.listReleases("unknown", {})).rejects.toThrow("App not found: unknown");
+        await expect(service.listReleases("unknown", {})).rejects.toThrow(
+            "There is no app registered under that name."
+        );
     });
 
     it("returns cached releases when provider reports 304", async function () {
