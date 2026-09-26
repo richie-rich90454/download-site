@@ -1,0 +1,4 @@
+# Normalise every text file to LF in the repository and in the working tree.
+# Without this, editing on Windows rewrites files to CRLF and turns a small change into a
+# whole-file rewrite, which makes diffs unreviewable and churns the history.
+* text=auto eol=lf
