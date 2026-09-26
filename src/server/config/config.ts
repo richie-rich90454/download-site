@@ -3,10 +3,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as z from "zod";
 import * as types from "../../shared/types.js";
+import { describeWeakSecret } from "../security/secret-compare.js";
 
 dotenv.config();
 
 export const DEFAULT_MAX_CACHEABLE_SIZE = 10 * 1024 * 1024 * 1024;
+
+/** Secrets shorter than this are refused at startup rather than silently accepted. */
+export const MIN_SECRET_LENGTH = 32;
 
 export interface ServerConfig {
     port: number;
@@ -25,6 +29,8 @@ export interface ServerConfig {
     assetCache?: {
         maxCacheableSize: number;
     };
+    adminApiKey: string | undefined;
+    webhookSecret: string | undefined;
     apps: types.App[];
 }
 
@@ -44,7 +50,9 @@ const envSchema = z.object({
     CONFIG_PATH: z.string().optional(),
     LOG_LEVEL: z.string().optional(),
     CORS_ORIGIN: z.string().optional(),
-    MAX_CACHEABLE_SIZE: z.coerce.number().positive().optional()
+    MAX_CACHEABLE_SIZE: z.coerce.number().positive().optional(),
+    ADMIN_API_KEY: z.string().optional(),
+    WEBHOOK_SECRET: z.string().optional()
 });
 
 export type RawEnv = z.infer<typeof envSchema>;
@@ -175,7 +183,16 @@ function applyOverride(config: ServerConfig, override: Partial<ServerConfig>): S
     return config;
 }
 
+function assertSecretStrength(name: string, value: string | undefined): void {
+    const problem = describeWeakSecret(name, value, MIN_SECRET_LENGTH);
+    if (problem !== undefined) {
+        throw new Error(problem);
+    }
+}
+
 function buildConfig(env: RawEnv): ServerConfig {
+    assertSecretStrength("ADMIN_API_KEY", env.ADMIN_API_KEY);
+    assertSecretStrength("WEBHOOK_SECRET", env.WEBHOOK_SECRET);
     const apps = parseApps(env.APPS);
     const logLevel = env.LOG_LEVEL !== undefined ? env.LOG_LEVEL : "info";
     const maxCacheableSize = env.MAX_CACHEABLE_SIZE !== undefined ? env.MAX_CACHEABLE_SIZE : DEFAULT_MAX_CACHEABLE_SIZE;
@@ -196,6 +213,8 @@ function buildConfig(env: RawEnv): ServerConfig {
         assetCache: {
             maxCacheableSize: maxCacheableSize
         },
+        adminApiKey: env.ADMIN_API_KEY,
+        webhookSecret: env.WEBHOOK_SECRET,
         apps: apps
     };
     if (env.CONFIG_PATH !== undefined) {
