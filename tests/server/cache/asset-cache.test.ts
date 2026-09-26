@@ -16,7 +16,12 @@ import { RecordingLogger, SilentLogger } from "../test-helpers.js";
 
 vi.mock("undici", function () {
     return {
-        request: vi.fn()
+        request: vi.fn(),
+        Agent: class {
+            close(): Promise<void> {
+                return Promise.resolve();
+            }
+        }
     };
 });
 
@@ -70,7 +75,7 @@ describe("DiskAssetCacheService", function () {
 
     it("downloads and caches an asset", async function () {
         const data = Buffer.from("hello asset");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -83,7 +88,7 @@ describe("DiskAssetCacheService", function () {
 
     it("returns stored checksum without downloading", async function () {
         const data = Buffer.from("hello asset");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         const expectedChecksum = crypto.createHash("sha256").update(data).digest("hex");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
@@ -104,7 +109,7 @@ describe("DiskAssetCacheService", function () {
 
     it("returns cached path on second request", async function () {
         const data = Buffer.from("cached asset");
-        const asset = createAsset("app.zip", data.length, "http://example.com/app.zip");
+        const asset = createAsset("app.zip", data.length, "https://github.com/app.zip");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -118,7 +123,7 @@ describe("DiskAssetCacheService", function () {
 
     it("coalesces concurrent downloads of same asset", async function () {
         const data = Buffer.from("coalesced");
-        const asset = createAsset("app.tar.gz", data.length, "http://example.com/app.tar.gz");
+        const asset = createAsset("app.tar.gz", data.length, "https://github.com/app.tar.gz");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -133,7 +138,7 @@ describe("DiskAssetCacheService", function () {
     it("re-downloads when checksum mismatches", async function () {
         const data1 = Buffer.from("first");
         const data2 = Buffer.from("second");
-        const asset = createAsset("app.exe", data2.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data2.length, "https://github.com/app.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce(createResponse(data1))
             .mockResolvedValueOnce(createResponse(data2));
@@ -157,8 +162,8 @@ describe("DiskAssetCacheService", function () {
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data1 = Buffer.from("first asset");
         const data2 = Buffer.from("second asset");
-        const asset1 = createAsset("first.exe", data1.length, "http://example.com/first.exe");
-        const asset2 = createAsset("second.exe", data2.length, "http://example.com/second.exe");
+        const asset1 = createAsset("first.exe", data1.length, "https://github.com/first.exe");
+        const asset2 = createAsset("second.exe", data2.length, "https://github.com/second.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce(createResponse(data1))
             .mockResolvedValueOnce(createResponse(data2));
@@ -172,7 +177,7 @@ describe("DiskAssetCacheService", function () {
 
     it("purges by app", async function () {
         const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -184,7 +189,7 @@ describe("DiskAssetCacheService", function () {
 
     it("purges by app and version", async function () {
         const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -196,7 +201,7 @@ describe("DiskAssetCacheService", function () {
 
     it("sanitizes file names to prevent directory traversal", async function () {
         const data = Buffer.from("safe");
-        const asset = createAsset("../../evil.exe", data.length, "http://example.com/evil.exe");
+        const asset = createAsset("../../evil.exe", data.length, "https://github.com/evil.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -207,7 +212,7 @@ describe("DiskAssetCacheService", function () {
     });
 
     it("throws when download returns non-2xx status", async function () {
-        const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce({
             statusCode: 404,
             headers: {},
@@ -221,7 +226,7 @@ describe("DiskAssetCacheService", function () {
     });
 
     it("throws when download response body is empty", async function () {
-        const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce({
             statusCode: 200,
             headers: {},
@@ -239,8 +244,8 @@ describe("DiskAssetCacheService", function () {
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data1 = Buffer.from("first asset content");
         const data2 = Buffer.from("second asset content");
-        const asset1 = createAsset("first.exe", data1.length, "http://example.com/first.exe");
-        const asset2 = createAsset("second.exe", data2.length, "http://example.com/second.exe");
+        const asset1 = createAsset("first.exe", data1.length, "https://github.com/first.exe");
+        const asset2 = createAsset("second.exe", data2.length, "https://github.com/second.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce(createResponse(data1))
             .mockResolvedValueOnce(createResponse(data2));
@@ -254,7 +259,7 @@ describe("DiskAssetCacheService", function () {
 
     it("purges all entries when no scope is given", async function () {
         const data = Buffer.from("purge all");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -266,7 +271,7 @@ describe("DiskAssetCacheService", function () {
 
     it("purges a single asset entry", async function () {
         const data = Buffer.from("purge one");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -285,7 +290,7 @@ describe("DiskAssetCacheService", function () {
         };
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data = Buffer.from("expiring soon");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
 
         const result = await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -308,7 +313,7 @@ describe("DiskAssetCacheService", function () {
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data1 = Buffer.from("first");
         const data2 = Buffer.from("second");
-        const asset = createAsset("app.exe", data2.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data2.length, "https://github.com/app.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce(createResponse(data1))
             .mockResolvedValueOnce(createResponse(data2));
@@ -324,7 +329,7 @@ describe("DiskAssetCacheService", function () {
 
     it("rejects when cached file is missing", async function () {
         const data = Buffer.from("first");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -335,7 +340,7 @@ describe("DiskAssetCacheService", function () {
     });
 
     it("cleans up temp file when download fails", async function () {
-        const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce({
             statusCode: 500,
             headers: {},
@@ -355,7 +360,7 @@ describe("DiskAssetCacheService", function () {
 
     it("handles file deletion errors during purge gracefully", async function () {
         const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -376,7 +381,7 @@ describe("DiskAssetCacheService", function () {
 
     it("handles missing files during purge gracefully", async function () {
         const data = Buffer.from("missing");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -389,7 +394,7 @@ describe("DiskAssetCacheService", function () {
 
     it("handles non-error file deletion failures gracefully", async function () {
         const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -411,7 +416,7 @@ describe("DiskAssetCacheService", function () {
 
     it("handles non-error thrown values during file deletion", async function () {
         const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -436,9 +441,9 @@ describe("DiskAssetCacheService", function () {
         const data1 = Buffer.from("a");
         const data2 = Buffer.from("b");
         const data3 = Buffer.from("cccccc");
-        const asset1 = createAsset("first.exe", data1.length, "http://example.com/first.exe");
-        const asset2 = createAsset("second.exe", data2.length, "http://example.com/second.exe");
-        const asset3 = createAsset("third.exe", data3.length, "http://example.com/third.exe");
+        const asset1 = createAsset("first.exe", data1.length, "https://github.com/first.exe");
+        const asset2 = createAsset("second.exe", data2.length, "https://github.com/second.exe");
+        const asset3 = createAsset("third.exe", data3.length, "https://github.com/third.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce(createResponse(data1))
             .mockResolvedValueOnce(createResponse(data2))
@@ -461,7 +466,7 @@ describe("DiskAssetCacheService", function () {
         };
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
         const data = Buffer.from("fresh");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
 
         const result = await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -481,7 +486,7 @@ describe("DiskAssetCacheService", function () {
             };
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, limits);
             const data = Buffer.from("expiring soon");
-            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
             vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
 
             const result = await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -495,11 +500,11 @@ describe("DiskAssetCacheService", function () {
 
     it("follows a redirect when downloading an asset", async function () {
         const data = Buffer.from("redirected asset");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce({
                 statusCode: 302,
-                headers: { location: "http://example.com/redirected.exe" },
+                headers: { location: "https://github.com/redirected.exe" },
                 body: null
             } as unknown as Awaited<ReturnType<typeof undici.request>>)
             .mockResolvedValueOnce(createResponse(data));
@@ -513,11 +518,11 @@ describe("DiskAssetCacheService", function () {
 
     it("handles redirect location provided as array", async function () {
         const data = Buffer.from("array redirect");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request)
             .mockResolvedValueOnce({
                 statusCode: 301,
-                headers: { location: ["http://example.com/redirected.exe"] },
+                headers: { location: ["https://github.com/redirected.exe"] },
                 body: null
             } as unknown as Awaited<ReturnType<typeof undici.request>>)
             .mockResolvedValueOnce(createResponse(data));
@@ -529,23 +534,73 @@ describe("DiskAssetCacheService", function () {
     });
 
     it("throws when redirect limit is exceeded", async function () {
-        const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValue({
             statusCode: 302,
-            headers: { location: "http://example.com/redirect.exe" },
+            headers: { location: "https://github.com/redirect.exe" },
             body: null
         } as unknown as Awaited<ReturnType<typeof undici.request>>);
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
         await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow(
-            "Asset download redirect limit exceeded"
+            "Asset download exceeded the redirect limit"
         );
+        // Five hops are followed, then the sixth request is refused.
+        expect(undici.request).toHaveBeenCalledTimes(6);
+    });
+
+    it("drains a redirect body before following so the socket returns to the pool", async function () {
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
+        const redirectBody = { dump: vi.fn().mockResolvedValue(undefined) };
+        vi.mocked(undici.request)
+            .mockResolvedValueOnce({
+                statusCode: 302,
+                headers: { location: "https://objects.githubusercontent.com/final.exe" },
+                body: redirectBody
+            } as unknown as Awaited<ReturnType<typeof undici.request>>)
+            .mockResolvedValueOnce(createResponse(Buffer.from("payload")));
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+        expect(redirectBody.dump).toHaveBeenCalledTimes(1);
+        expect(result.cached).toBe(false);
+    });
+
+    it("returns a redirect response that carries no location instead of looping", async function () {
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue({
+            statusCode: 302,
+            headers: {},
+            body: null
+        } as unknown as Awaited<ReturnType<typeof undici.request>>);
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow(
+            "Asset download failed with status 302"
+        );
+        expect(undici.request).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns a redirect whose location is an empty array", async function () {
+        const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValue({
+            statusCode: 302,
+            headers: { location: [] },
+            body: null
+        } as unknown as Awaited<ReturnType<typeof undici.request>>);
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow(
+            "Asset download failed with status 302"
+        );
+        expect(undici.request).toHaveBeenCalledTimes(1);
     });
 
     it("aborts download when timeout fires", async function () {
         vi.useFakeTimers();
         try {
-            const asset = createAsset("app.exe", 5, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
             vi.mocked(undici.request).mockImplementation(function (_url, options) {
                 const signal = options === undefined ? undefined : options.signal;
                 return new Promise(function (_resolve, reject) {
@@ -569,7 +624,7 @@ describe("DiskAssetCacheService", function () {
 
     it("cleans up temp file when file stream errors", async function () {
         const data = Buffer.from("hello");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(12345);
         const assetDir = path.join(tempDir, "assets", "app1", "v1.0.0");
         fs.mkdirSync(assetDir, { recursive: true });
@@ -600,7 +655,7 @@ describe("DiskAssetCacheService", function () {
     describe("O(1) hit validation", function () {
         it("serves a cache hit without re-hashing the file when size and mtime are unchanged", async function () {
             const data = Buffer.from("stable asset bytes");
-            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
             vi.mocked(undici.request).mockResolvedValue(createResponse(data));
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
             await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -618,7 +673,7 @@ describe("DiskAssetCacheService", function () {
 
         it("re-verifies by hash when the file changed but the content is identical, then returns to O(1)", async function () {
             const data = Buffer.from("rewritten but identical");
-            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
             vi.mocked(undici.request).mockResolvedValue(createResponse(data));
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
             const first = await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -647,7 +702,7 @@ describe("DiskAssetCacheService", function () {
         it("re-downloads when the file is deleted underneath a valid row", async function () {
             const data1 = Buffer.from("first");
             const data2 = Buffer.from("second payload");
-            const asset = createAsset("app.exe", data2.length, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", data2.length, "https://github.com/app.exe");
             vi.mocked(undici.request)
                 .mockResolvedValueOnce(createResponse(data1))
                 .mockResolvedValueOnce(createResponse(data2));
@@ -664,7 +719,7 @@ describe("DiskAssetCacheService", function () {
 
         it("treats a file that cannot be read during verification as a miss", async function () {
             const data = Buffer.from("payload");
-            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
             vi.mocked(undici.request)
                 .mockResolvedValueOnce(createResponse(data))
                 .mockResolvedValueOnce(createResponse(data));
@@ -693,7 +748,7 @@ describe("DiskAssetCacheService", function () {
         });
         it("handles a non-Error thrown while verifying a changed file", async function () {
             const data = Buffer.from("payload");
-            const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+            const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
             vi.mocked(undici.request)
                 .mockResolvedValueOnce(createResponse(data))
                 .mockResolvedValueOnce(createResponse(data));
@@ -728,14 +783,14 @@ describe("DiskAssetCacheService", function () {
 
     describe("path traversal hardening", function () {
         it("refuses to cache an asset whose name is a reserved path segment", async function () {
-            const asset = createAsset("..", 3, "http://example.com/x");
+            const asset = createAsset("..", 3, "https://github.com/x");
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
             await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow("reserved path name");
         });
 
         it("refuses a dot asset name", async function () {
-            const asset = createAsset(".", 3, "http://example.com/x");
+            const asset = createAsset(".", 3, "https://github.com/x");
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
             await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow("reserved path name");
@@ -744,8 +799,8 @@ describe("DiskAssetCacheService", function () {
         it("keeps distinct raw names that sanitise to the same string in separate files", async function () {
             const data1 = Buffer.from("one");
             const data2 = Buffer.from("two");
-            const assetA = createAsset("release/1.0", data1.length, "http://example.com/a");
-            const assetB = createAsset("release_1.0", data2.length, "http://example.com/b");
+            const assetA = createAsset("release/1.0", data1.length, "https://github.com/a");
+            const assetB = createAsset("release_1.0", data2.length, "https://github.com/b");
             vi.mocked(undici.request)
                 .mockResolvedValueOnce(createResponse(data1))
                 .mockResolvedValueOnce(createResponse(data2));
@@ -761,7 +816,7 @@ describe("DiskAssetCacheService", function () {
         });
 
         it("refuses a version tag that sanitises to a reserved segment", async function () {
-            const asset = createAsset("app.exe", 3, "http://example.com/x");
+            const asset = createAsset("app.exe", 3, "https://github.com/x");
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
             await expect(cache.getAssetPath("app1", "..", asset)).rejects.toThrow("reserved path name");
@@ -820,7 +875,7 @@ describe("DiskAssetCacheService", function () {
 
     it("reports cache stats from memoised counters in O(1)", async function () {
         const data = Buffer.from("counted bytes");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValue(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
@@ -839,7 +894,7 @@ describe("DiskAssetCacheService", function () {
 
     it("invalidates memoised stats after a purge", async function () {
         const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValue(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
         await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -906,7 +961,7 @@ describe("DiskAssetCacheService", function () {
 
     it("backfills size and mtime for rows written before those columns existed", async function () {
         const data = Buffer.from("legacy row");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValue(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
         await cache.getAssetPath("app1", "v1.0.0", asset);
@@ -932,7 +987,7 @@ describe("DiskAssetCacheService", function () {
 
     it("skips unreadable files during the stat backfill and leaves the sentinel in place", async function () {
         const data = Buffer.from("row with a vanished file");
-        const asset = createAsset("app.exe", data.length, "http://example.com/app.exe");
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         vi.mocked(undici.request).mockResolvedValue(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
         await cache.getAssetPath("app1", "v1.0.0", asset);
