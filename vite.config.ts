@@ -1,10 +1,15 @@
 import { defineConfig } from "vite";
 
+// Off by default: with @fastify/static serving dist/public with no deny rules, a source map in
+// the output is world-readable and hands out the full original TypeScript, including the exact
+// markdown and sanitiser configuration. Set SOURCEMAP=true to opt in for local debugging.
+const sourcemap = process.env.SOURCEMAP === "true";
+
 export default defineConfig({
     build: {
         outDir: "dist/public",
         emptyOutDir: true,
-        sourcemap: true,
+        sourcemap: sourcemap,
         minify: true,
         rollupOptions: {
             output: {
