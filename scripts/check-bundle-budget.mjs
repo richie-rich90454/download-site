@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import ts from "typescript";
 import * as path from "node:path";
 
 /**
@@ -26,6 +27,7 @@ if (!fs.existsSync(publicDir)) {
 }
 
 const violations = [];
+const jsFiles = [];
 let total = 0;
 let largestJs = 0;
 
@@ -45,6 +47,7 @@ function walk(dir) {
         const size = fs.statSync(full).size;
         total += size;
         if (entry.name.endsWith(".js")) {
+            jsFiles.push(full);
             largestJs = Math.max(largestJs, size);
             if (size > BUDGETS[0].bytes) {
                 violations.push(
@@ -61,6 +64,94 @@ walk(publicDir);
 
 if (total > BUDGETS[2].bytes) {
     violations.push("total client assets are " + Math.round(total / 1024) + " KB");
+}
+
+// Syntax newer than ES6, by the year it landed. Checked with the compiler's parser rather than a
+// pattern, because a regex over a minified bundle matches happily inside the string literals that
+// marked.js's grammar definitions are full of - which would make this either useless or a false
+// alarm, depending on the pattern.
+//
+// The target is declared twice, in vite.config.ts and in tsconfig.json. Neither is a guarantee on
+// its own: one is a bundler setting that can be dropped, the other a checker that emits nothing.
+const TOO_NEW = [
+    [2016, "exponentiation operator"],
+    [2017, "async/await"],
+    [2018, "object rest/spread"],
+    [2019, "optional catch binding"],
+    [2020, "optional chaining"],
+    [2020, "nullish coalescing"],
+    [2020, "BigInt"],
+    [2021, "logical assignment"],
+    [2022, "class fields"],
+    [2022, "top-level await"],
+    [2023, "array findLast"]
+];
+
+function findTooNew(file) {
+    const source = ts.createSourceFile(
+        file,
+        fs.readFileSync(file, "utf-8"),
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.JS
+    );
+    const found = new Set();
+    const visit = function (node) {
+        if (node.kind === ts.SyntaxKind.AsyncFunction || node.kind === ts.SyntaxKind.AwaitExpression) {
+            found.add(2017);
+        }
+        if (
+            node.kind === ts.SyntaxKind.BinaryExpression &&
+            node.operatorToken.kind === ts.SyntaxKind.AsteriskAsteriskToken
+        ) {
+            found.add(2016);
+        }
+        if (node.kind === ts.SyntaxKind.PropertyAccessExpression && node.questionDotToken !== undefined) {
+            found.add(2020);
+        }
+        if (
+            node.kind === ts.SyntaxKind.BinaryExpression &&
+            node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+        ) {
+            found.add(2020);
+        }
+        if (node.kind === ts.SyntaxKind.BigIntLiteral) {
+            found.add(2020);
+        }
+        if (
+            node.kind === ts.SyntaxKind.BinaryExpression &&
+            (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken ||
+                node.operatorToken.kind === ts.SyntaxKind.BarBarEqualsToken ||
+                node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionEqualsToken)
+        ) {
+            found.add(2021);
+        }
+        if (node.kind === ts.SyntaxKind.VariableDeclaration && node.initializer !== undefined && node.questionToken) {
+            found.add(2021);
+        }
+        if (node.kind === ts.SyntaxKind.PropertyDeclaration || node.kind === ts.SyntaxKind.PropertySignature) {
+            found.add(2022);
+        }
+        if (
+            node.kind === ts.SyntaxKind.PropertyAssignment &&
+            node.name.kind === ts.SyntaxKind.Identifier &&
+            node.name.escapedText === "__publicField"
+        ) {
+            found.add(2022);
+        }
+        ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(source, visit);
+    return Array.from(found);
+}
+
+for (const file of jsFiles) {
+    for (const year of findTooNew(file)) {
+        const rule = TOO_NEW.find(function (entry) {
+            return entry[0] === year;
+        });
+        violations.push("post-ES6 syntax (" + String(rule[1]) + ") in " + path.relative(publicDir, file));
+    }
 }
 
 if (violations.length > 0) {
