@@ -100,4 +100,39 @@ export async function registerReleaseRoutes(app: FastifyInstance): Promise<void>
             });
         }
     );
+
+    app.get(
+        "/api/releases/:app/:tag/notes",
+        {
+            schema: {
+                tags: ["Releases"],
+                description: "Release notes for one tag, as markdown",
+                params: {
+                    type: "object",
+                    required: ["app", "tag"],
+                    properties: {
+                        app: { type: "string", minLength: 1 },
+                        tag: { type: "string", minLength: 1 }
+                    }
+                }
+            }
+        },
+        async function (request: FastifyRequest, reply: FastifyReply) {
+            const services = app.services;
+            const params = request.params as { app: string; tag: string };
+            const release = await services.release.getReleaseByTag(params.app, params.tag);
+            if (release === undefined) {
+                reply.status(404).send({
+                    error: { code: "NOT_FOUND", message: "No release found for that tag" }
+                });
+                return;
+            }
+            // Markdown source, not rendered HTML. Serving HTML from here would mean running an HTML
+            // sanitiser in the server process - which needs a DOM implementation, tens of megabytes
+            // on a 2 vCPU box, and a second sanitiser whose rules could drift from the browser's and
+            // quietly become the weaker one. Consumers that want HTML already have the page; this
+            // exists for the ones that do not have a browser at all.
+            reply.type("text/markdown; charset=utf-8").send(release.notes);
+        }
+    );
 }
