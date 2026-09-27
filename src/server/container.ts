@@ -96,7 +96,9 @@ export function registerServices(cfg: config.ServerConfig): Services {
     );
     container.registerInstance("ReleaseService", releaseSvc);
 
-    const baseUrl = "http://localhost:" + cfg.port;
+    // Absolute download URLs in every updater response and the Sparkle appcast are built from
+    // this. It used to be hardcoded to http://localhost:<port>, so no real client could use them.
+    const baseUrl = cfg.publicBaseUrl;
     const downloadSvc = new downloadService.DownloadService(
         releaseSvc,
         assetCacheService,
