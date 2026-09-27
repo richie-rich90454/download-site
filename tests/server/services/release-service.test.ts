@@ -232,6 +232,68 @@ describe("ReleaseService", function () {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it("pages a warm cache without decoding the whole history", async function () {
+        const tags = ["v1.0.0", "v1.1.0", "v1.2.0", "v1.3.0", "v1.4.0"];
+        provider.setReleases(
+            tags.map(function (tag, index) {
+                return createGitHubRelease(tag, "2024-0" + String(index + 1) + "-01T00:00:00Z");
+            })
+        );
+        // Cold first, so the cache is warm for the call that matters.
+        await service.listReleases("app1", {});
+
+        const page = await service.listReleasesPage("app1", { page: 2, perPage: 2 });
+
+        // The total is the whole archive; the payload is one page. A caller can show page
+        // numbers without the server handing over every release.
+        expect(page.total).toBe(5);
+        expect(page.releases.length).toBe(2);
+        expect(page.releases[0].tag).toBe("v1.2.0");
+        expect(page.releases[1].tag).toBe("v1.1.0");
+    });
+
+    it("returns an empty page past the end rather than an error", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        await service.listReleases("app1", {});
+
+        const page = await service.listReleasesPage("app1", { page: 9, perPage: 10 });
+
+        expect(page.releases.length).toBe(0);
+        expect(page.total).toBe(1);
+    });
+
+    it("pages a cold cache from the provider result", async function () {
+        provider.setReleases([
+            createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"),
+            createGitHubRelease("v1.1.0", "2024-02-01T00:00:00Z"),
+            createGitHubRelease("v1.2.0", "2024-03-01T00:00:00Z")
+        ]);
+
+        const page = await service.listReleasesPage("app1", { page: 2, perPage: 1 });
+
+        expect(page.releases.length).toBe(1);
+        expect(page.releases[0].tag).toBe("v1.1.0");
+        expect(page.total).toBe(3);
+    });
+
+    it("clamps a cold page whose offset is past the end", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+
+        const page = await service.listReleasesPage("app1", { page: 5, perPage: 10 });
+
+        expect(page.releases.length).toBe(0);
+    });
+
+    it("defaults to the first page of thirty when no page is asked for", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        await service.listReleases("app1", {});
+
+        const page = await service.listReleasesPage("app1", {});
+
+        expect(page.releases.length).toBe(1);
+        expect(page.total).toBe(1);
+    });
+
     it("lists releases from provider on cache miss", async function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
 
