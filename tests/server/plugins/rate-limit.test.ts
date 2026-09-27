@@ -3,7 +3,6 @@ import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import * as rateLimit from "../../../src/server/plugins/rate-limit.js";
 import * as config from "../../../src/server/config/config.js";
-import { SilentLogger } from "../test-helpers.js";
 
 const CF_PEER = "104.16.0.1";
 const ORIGIN_PEER = "203.0.113.9";
@@ -28,7 +27,6 @@ function testConfig(max: number, timeWindow: number, burst?: number): config.Ser
 
 async function buildApp(cfg: config.ServerConfig): Promise<FastifyInstance> {
     const app = Fastify({ logger: false });
-    app.decorate("services", { logger: new SilentLogger() });
     app.get("/api/releases/:app", async function () {
         return { ok: true };
     });
