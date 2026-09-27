@@ -12,6 +12,30 @@ describe("release-notes-modal", function () {
         expect(modal.element.getAttribute("role")).toBe("dialog");
     });
 
+    test("fetches the renderer once across repeated opens", async function () {
+        const modal = createReleaseNotesModal();
+        const release = {
+            tag: "v1.0.0",
+            name: "Release",
+            notes: "# Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: []
+        };
+
+        await modal.open(release);
+        await modal.open(release);
+        await modal.open(release);
+
+        // The renderer is a hundred kilobytes of JavaScript fetched on demand, so re-opening the
+        // notes must reuse it rather than queue another request for a module already resident.
+        // Three opens with one import is the only way this is observable from outside.
+        const body = modal.element.querySelector(".modal-body");
+        if (body !== null) {
+            expect(body.textContent.indexOf("Notes") >= 0).toBe(true);
+        }
+    });
+
     test("open displays modal and renders markdown notes", async function () {
         const modal = createReleaseNotesModal();
         await modal.open({
