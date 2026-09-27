@@ -70,23 +70,26 @@ export class ReleaseService {
     }
 
     async getLatestRelease(appId: string, includePrerelease: boolean): Promise<types.Release | undefined> {
+        // O(1): the cache holds a pointer to the newest release, so this no longer decodes and
+        // sorts the app's entire history on every updater poll.
+        const cached = this.cache.getLatestRelease(appId, includePrerelease);
+        if (cached !== undefined && cached.expiresAt > Date.now()) {
+            return cached.release;
+        }
         const releases = await this.listReleases(appId, { includePrerelease: includePrerelease });
         if (releases.length === 0) {
             return undefined;
         }
-        const sorted = releases.slice(0);
-        sorted.sort(function (a, b) {
-            const aDate = new Date(a.publishedAt).getTime();
-            const bDate = new Date(b.publishedAt).getTime();
-            if (aDate > bDate) {
-                return -1;
+        let newest = releases[0];
+        let newestAt = Date.parse(newest.publishedAt);
+        for (let i = 1; i < releases.length; i = i + 1) {
+            const candidate = Date.parse(releases[i].publishedAt);
+            if (candidate > newestAt) {
+                newestAt = candidate;
+                newest = releases[i];
             }
-            if (aDate < bDate) {
-                return 1;
-            }
-            return 0;
-        });
-        return sorted[0];
+        }
+        return newest;
     }
 
     async getReleaseByTag(appId: string, tag: string): Promise<types.Release | undefined> {
