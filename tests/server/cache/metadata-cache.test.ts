@@ -64,13 +64,13 @@ describe("SqliteMetadataCacheService", function () {
 
         expect(result).toBeDefined();
 
-        expect(result.releases.length).toBe(1);
+        expect(result !== undefined ? result.releases.length : 0).toBe(1);
 
-        expect(result.releases[0].tag).toBe("v1.0.0");
+        expect(result !== undefined ? result.releases[0].tag : undefined).toBe("v1.0.0");
 
-        expect(result.etag).toBe('"etag1"');
+        expect(result !== undefined ? result.etag : undefined).toBe('"etag1"');
 
-        expect(result.expiresAt > Date.now()).toBe(true);
+        expect(result !== undefined ? result.expiresAt > Date.now() : false).toBe(true);
     });
 
     it("stores and retrieves a release by tag", function () {
@@ -82,9 +82,9 @@ describe("SqliteMetadataCacheService", function () {
 
         expect(result).toBeDefined();
 
-        expect(result.release.tag).toBe("v1.0.0");
+        expect(result !== undefined ? result.release.tag : undefined).toBe("v1.0.0");
 
-        expect(result.etag).toBe('"etag1"');
+        expect(result !== undefined ? result.etag : undefined).toBe('"etag1"');
     });
 
     it("filters prereleases when requested", function () {
@@ -94,9 +94,9 @@ describe("SqliteMetadataCacheService", function () {
 
         const result = cache.getReleases("app1", { includePrerelease: false });
 
-        expect(result.releases.length).toBe(1);
+        expect(result !== undefined ? result.releases.length : 0).toBe(1);
 
-        expect(result.releases[0].tag).toBe("v1.0.0");
+        expect(result !== undefined ? result.releases[0].tag : undefined).toBe("v1.0.0");
     });
 
     it("includes prereleases when requested", function () {
@@ -106,7 +106,7 @@ describe("SqliteMetadataCacheService", function () {
 
         const result = cache.getReleases("app1", { includePrerelease: true });
 
-        expect(result.releases.length).toBe(2);
+        expect(result !== undefined ? result.releases.length : 0).toBe(2);
     });
 
     it("invalidates by app", function () {
@@ -180,9 +180,9 @@ describe("SqliteMetadataCacheService", function () {
 
         expect(result).toBeDefined();
 
-        expect(result.release.name).toBe("Updated");
+        expect(result !== undefined ? result.release.name : undefined).toBe("Updated");
 
-        expect(result.etag).toBe('"etag2"');
+        expect(result !== undefined ? result.etag : undefined).toBe('"etag2"');
     });
 
     describe("O(1) latest resolution", function () {
@@ -483,18 +483,18 @@ describe("SqliteMetadataCacheService", function () {
             .run("stale", "v0.0.1", msgpackr.pack(createRelease("v0.0.1", false)), Date.now(), Date.now() + 60000);
         legacy.close();
 
-        const cache = new metadataCache.SqliteMetadataCacheService(legacyDir, new SilentLogger());
+        const rebuilt = new metadataCache.SqliteMetadataCacheService(legacyDir, new SilentLogger());
         try {
             // The old shape cannot be migrated, and a cache has nothing worth preserving, so the
             // file is thrown away rather than left to fail the boot on every start.
-            expect(cache.getReleases("stale")).toBeUndefined();
-            expect(cache.getLatestRelease("stale", false)).toBeUndefined();
+            expect(rebuilt.getReleases("stale")).toBeUndefined();
+            expect(rebuilt.getLatestRelease("stale", false)).toBeUndefined();
 
-            cache.setRelease("fresh", "v1.0.0", createRelease("v1.0.0", false), undefined, 60);
-            const stored = cache.getReleaseByTag("fresh", "v1.0.0");
+            rebuilt.setRelease("fresh", "v1.0.0", createRelease("v1.0.0", false), undefined, 60);
+            const stored = rebuilt.getReleaseByTag("fresh", "v1.0.0");
             expect(stored !== undefined ? stored.release.tag : undefined).toBe("v1.0.0");
         } finally {
-            cache.close();
+            rebuilt.close();
         }
     });
 
@@ -508,25 +508,27 @@ describe("SqliteMetadataCacheService", function () {
         // resurrect rows for tables that no longer exist, so it has to go with the database.
         fs.writeFileSync(dbPath + "-wal", "stale write-ahead log");
 
-        const cache = new metadataCache.SqliteMetadataCacheService(legacyDir, new SilentLogger());
+        const rebuilt = new metadataCache.SqliteMetadataCacheService(legacyDir, new SilentLogger());
         try {
             // WAL recreates its own sidecars on open, so the check is that nothing replayed:
             // the old app_state row is gone and the cache is usable.
-            expect(cache.getReleases("anything")).toBeUndefined();
-            cache.setRelease("fresh", "v1.0.0", createRelease("v1.0.0", false), undefined, 60);
-            const stored = cache.getReleaseByTag("fresh", "v1.0.0");
+            expect(rebuilt.getReleases("anything")).toBeUndefined();
+            rebuilt.setRelease("fresh", "v1.0.0", createRelease("v1.0.0", false), undefined, 60);
+            const stored = rebuilt.getReleaseByTag("fresh", "v1.0.0");
             expect(stored !== undefined ? stored.release.tag : undefined).toBe("v1.0.0");
         } finally {
-            cache.close();
+            rebuilt.close();
         }
     });
+
     it("rethrows an error that is not an unreadable schema", function () {
         const brokenDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-broken-"));
         // A directory where the database file belongs: the open itself fails, and swallowing that
         // as "unreadable schema" would delete the operator's directory and retry forever.
         fs.mkdirSync(path.join(brokenDir, "metadata.db"));
         expect(function () {
-            new metadataCache.SqliteMetadataCacheService(brokenDir, new SilentLogger());
+            const opened = new metadataCache.SqliteMetadataCacheService(brokenDir, new SilentLogger());
+            expect(opened).toBeDefined();
         }).toThrow();
     });
 });
