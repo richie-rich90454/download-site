@@ -52,8 +52,11 @@ export function resolveIndexPath(existsSyncFn?: (targetPath: string) => boolean)
 
 export { resolvePublicDir };
 
-export async function registerStatic(app: FastifyInstance): Promise<void> {
-    const publicDir = resolvePublicDir();
+export async function registerStatic(app: FastifyInstance, root?: string): Promise<void> {
+    // The root is injectable so a test can register against a directory it controls. Deriving it
+    // from the presence of a build artifact otherwise makes the result depend on whether anyone
+    // has run a build, which is not a property worth asserting on.
+    const publicDir = root !== undefined ? root : resolvePublicDir();
     await app.register(fastifyStatic.default, {
         root: publicDir,
         wildcard: true

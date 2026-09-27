@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Fastify from "fastify";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as staticPlugin from "../../../src/server/plugins/static.js";
 
@@ -88,15 +89,37 @@ describe("static plugin", function () {
         expect(staticPlugin.resolveIndexPath(existsSyncFn)).toBeUndefined();
     });
 
-    it("registers static files", async function () {
+    it("serves files from the directory it is given", async function () {
+        // A root the test controls, so the result cannot depend on whether a build has been run.
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-static-"));
+        fs.writeFileSync(path.join(root, "index.html"), "<!doctype html><title>page</title>");
         const app = Fastify({ logger: false });
 
-        await staticPlugin.registerStatic(app);
+        await staticPlugin.registerStatic(app, root);
 
-        // The plugin serves the directory; the page itself comes from the app's not-found handler,
-        // which is where the built-versus-Vite decision is made.
-        const response = await app.inject({ method: "GET", url: "/index.html" });
-        expect(response.statusCode).toBe(404);
+        try {
+            const response = await app.inject({ method: "GET", url: "/index.html" });
+            expect(response.statusCode).toBe(200);
+            expect(response.body).toContain("page");
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("does not serve the page itself, which is the not-found handler's job", async function () {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-static-empty-"));
+        const app = Fastify({ logger: false });
+
+        await staticPlugin.registerStatic(app, root);
+
+        try {
+            // The built-versus-Vite decision is made by resolveIndexPath, not here. Asserting a 200
+            // for /index.html in this suite was asserting a stale file in the public directory.
+            const response = await app.inject({ method: "GET", url: "/index.html" });
+            expect(response.statusCode).toBe(404);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it("serves assets with correct content type", async function () {
