@@ -164,6 +164,15 @@ class MockReleaseService {
     }
 
     async listReleases(): Promise<types.Release[]> {
+        return this.listOrThrow();
+    }
+
+    async listReleasesPage(): Promise<{ releases: types.Release[]; total: number }> {
+        const releases = this.listOrThrow();
+        return { releases: releases, total: releases.length };
+    }
+
+    private listOrThrow(): types.Release[] {
         if (this.throwOnList) {
             throw new Error("release service failure");
         }
