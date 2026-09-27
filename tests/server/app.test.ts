@@ -1364,12 +1364,23 @@ vitest.describe("buildApp", function () {
         const publicDir = path.resolve(process.cwd(), "public");
         const distIndexPath = path.resolve(distPublicDir, "index.html");
         const publicIndexPath = path.resolve(publicDir, "index.html");
+        // Outside production the Vite entry is the last fallback, so it has to move too for this to
+        // be a test about there being no page at all.
+        const viteEntryPath = path.resolve(process.cwd(), "index.html");
         const distBackupPath = distIndexPath + ".bak";
         const publicBackupPath = publicIndexPath + ".bak";
+        const viteBackupPath = viteEntryPath + ".bak";
         const movedDist = fs.existsSync(distIndexPath);
         const movedPublic = fs.existsSync(publicIndexPath);
+        const movedVite = fs.existsSync(viteEntryPath);
         if (movedDist) {
             fs.renameSync(distIndexPath, distBackupPath);
+        }
+        if (movedPublic) {
+            fs.renameSync(publicIndexPath, publicBackupPath);
+        }
+        if (movedVite) {
+            fs.renameSync(viteEntryPath, viteBackupPath);
         }
         if (movedPublic) {
             fs.renameSync(publicIndexPath, publicBackupPath);
@@ -1392,6 +1403,9 @@ vitest.describe("buildApp", function () {
             }
             if (movedPublic) {
                 fs.renameSync(publicBackupPath, publicIndexPath);
+            }
+            if (movedVite) {
+                fs.renameSync(viteBackupPath, viteEntryPath);
             }
         }
     });
