@@ -157,3 +157,7 @@ coverage-*.txt
 bisect-cov.txt
 real-cov.txt
 diag-cov*.txt
+
+# pnpm
+.pnpm-store/
+.pnpm-debug.log*
