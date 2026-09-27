@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as z from "zod";
 import * as types from "../../shared/types.js";
+import * as sharedSchemas from "../../shared/schemas.js";
 import { describeWeakSecret } from "../security/secret-compare.js";
 
 dotenv.config();
@@ -35,12 +36,6 @@ export interface ServerConfig {
     publicBaseUrl: string;
     apps: types.App[];
 }
-
-const AppConfigSchema = z.object({
-    id: z.string().min(1),
-    repo: z.string().min(1),
-    name: z.string().min(1)
-});
 
 const envSchema = z.object({
     PORT: z.coerce.number().int().positive(),
@@ -96,7 +91,7 @@ function parseApps(json: string): types.App[] {
     const result: types.App[] = [];
     for (let i = 0; i < parsed.length; i = i + 1) {
         const item = parsed[i];
-        const validated = AppConfigSchema.parse(item);
+        const validated = sharedSchemas.AppSchema.parse(item);
         result.push({
             id: validated.id,
             repo: validated.repo,
