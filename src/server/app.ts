@@ -1,7 +1,6 @@
 import Fastify from "fastify";
 import type { FastifyInstance, FastifyError, FastifyRequest, FastifyReply } from "fastify";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import type { Services } from "./container.js";
 import * as helmet from "./plugins/helmet.js";
 import * as cors from "./plugins/cors.js";
@@ -68,9 +67,8 @@ export async function buildApp(services: Services): Promise<FastifyInstance> {
         const accept = request.headers.accept;
         const wantsHtml = accept !== undefined && accept.indexOf("text/html") >= 0;
         if (wantsHtml || (request.url.indexOf("/api/") !== 0 && request.url.indexOf("/download/") !== 0)) {
-            const publicDir = staticFiles.getPublicDir();
-            const indexPath = path.resolve(publicDir, "index.html");
-            if (fs.existsSync(indexPath)) {
+            const indexPath = staticFiles.resolveIndexPath();
+            if (indexPath !== undefined) {
                 reply.type("text/html").send(fs.createReadStream(indexPath));
                 return;
             }
