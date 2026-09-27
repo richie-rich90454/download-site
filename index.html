@@ -3,26 +3,54 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="color-scheme" content="light dark" />
+        <meta
+            name="description"
+            content="Download installers for Richard's Blogs applications, and check for updates."
+        />
         <title>Richard's Blogs - Application Download</title>
     </head>
     <body>
         <div id="offline-banner" class="offline-banner is-hidden" role="status" aria-live="polite">
             You are currently offline. Some features may be unavailable.
         </div>
+
+        <!--
+            The page is drawn as one Aero window. The caption buttons are decoration and are hidden
+            from assistive technology on purpose: a control that does nothing is worse than no
+            control, and the only real one in this document is the release-notes close button.
+        -->
         <div class="container">
-            <h1>Richard's Blogs Application Downloads</h1>
-            <div class="subhead">Choose your app &amp; platform</div>
-            <div class="search-bar">
-                <label for="release-search">Search releases</label>
-                <input
-                    id="release-search"
-                    type="search"
-                    placeholder="Filter by version or keywords..."
-                    autocomplete="off"
-                />
+            <div class="window-chrome">
+                <span class="window-icon" aria-hidden="true"></span>
+                <h1 class="window-title">Richard's Blogs - Application Download</h1>
+                <div class="caption-buttons" aria-hidden="true">
+                    <span class="caption-button caption-button--min"></span>
+                    <span class="caption-button caption-button--max"></span>
+                    <span class="caption-button"></span>
+                </div>
             </div>
-            <div id="app-grid" class="app-grid"></div>
+
+            <div class="window-body">
+                <div class="title-row">
+                    <h2>Choose your app &amp; platform</h2>
+                    <div class="subhead">Installers are served from this server, not from GitHub.</div>
+                </div>
+
+                <div class="search-bar">
+                    <label for="release-search">Search releases</label>
+                    <input
+                        id="release-search"
+                        type="search"
+                        placeholder="Filter by version or keywords..."
+                        autocomplete="off"
+                    />
+                </div>
+
+                <div id="app-grid" class="app-grid"></div>
+            </div>
         </div>
+
         <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
         <script type="module" src="/src/public/script.ts"></script>
     </body>
