@@ -55,7 +55,8 @@ describe("PinoLogger", function () {
     });
 
     it("creates a pino logger with the configured level", function () {
-        new PinoLogger("warn");
+        const created = new PinoLogger("warn");
+        expect(created).toBeDefined();
 
         expect(pino).toHaveBeenCalledTimes(1);
         const options = (vi.mocked(pino).mock.calls[0] as unknown[])[0] as Record<string, unknown>;
