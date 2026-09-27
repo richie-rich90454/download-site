@@ -31,6 +31,7 @@ export interface ServerConfig {
     };
     adminApiKey: string | undefined;
     webhookSecret: string | undefined;
+    publicBaseUrl: string;
     apps: types.App[];
 }
 
@@ -52,8 +53,31 @@ const envSchema = z.object({
     CORS_ORIGIN: z.string().optional(),
     MAX_CACHEABLE_SIZE: z.coerce.number().positive().optional(),
     ADMIN_API_KEY: z.string().optional(),
-    WEBHOOK_SECRET: z.string().optional()
+    WEBHOOK_SECRET: z.string().optional(),
+    PUBLIC_BASE_URL: z.string().optional()
 });
+
+/**
+ * The origin that clients should be sent to.
+ *
+ * Every updater response and the whole Sparkle appcast embed absolute download URLs built from
+ * this value, so it has to be the address the outside world uses. It was previously hardcoded to
+ * `http://localhost:<port>`, which made every updater endpoint hand clients an unusable URL.
+ *
+ * Required in production because a mirror whose updater URLs point at localhost does not work;
+ * optional in development, where localhost is genuinely correct.
+ */
+export function resolvePublicBaseUrl(env: RawEnv, port: number): string {
+    if (env.PUBLIC_BASE_URL !== undefined && env.PUBLIC_BASE_URL.length > 0) {
+        return env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+    }
+    if (process.env.NODE_ENV === "production") {
+        throw new Error(
+            "PUBLIC_BASE_URL is required when NODE_ENV=production: updater responses embed absolute download URLs built from it"
+        );
+    }
+    return "http://localhost:" + String(port);
+}
 
 export type RawEnv = z.infer<typeof envSchema>;
 
@@ -215,6 +239,7 @@ function buildConfig(env: RawEnv): ServerConfig {
         },
         adminApiKey: env.ADMIN_API_KEY,
         webhookSecret: env.WEBHOOK_SECRET,
+        publicBaseUrl: resolvePublicBaseUrl(env, env.PORT),
         apps: apps
     };
     if (env.CONFIG_PATH !== undefined) {
