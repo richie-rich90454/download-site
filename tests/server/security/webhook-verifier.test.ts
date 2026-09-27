@@ -6,7 +6,10 @@ import * as webhookVerifier from "../../../src/server/security/webhook-verifier.
 
 import { SilentLogger } from "../test-helpers.js";
 
-function createRequest(body: unknown, signature?: string | string[]): Record<string, unknown> {
+function createRequest(
+    body: unknown,
+    signature?: string | string[]
+): { body: unknown; headers: Record<string, unknown>; url: string } {
     const headers: Record<string, unknown> = {};
 
     if (signature !== undefined) {
