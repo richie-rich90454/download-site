@@ -11,25 +11,25 @@
     "packageManager": "pnpm@12.4.1",
     "scripts": {
         "build": "pnpm run build:server && pnpm run build:public",
-        "build:server": "tsc -b",
+        "build:server": "tsc -p tsconfig.server.json",
         "build:public": "vite build",
         "check:bundle": "node scripts/check-bundle-budget.mjs",
         "db:check": "drizzle-kit check",
         "db:generate": "drizzle-kit generate",
-        "typecheck": "tsc -b",
+        "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.server.json --noEmit",
         "dev:public": "vite",
         "start": "node dist/server/main.js",
         "prod": "pnpm run build && pnpm run start",
         "test": "vitest run",
-        "lint": "eslint src tests --ext .ts,.tsx,.js,.jsx",
-        "lint:fix": "eslint src tests --ext .ts,.tsx,.js,.jsx --fix",
+        "lint": "oxlint src tests scripts && node scripts/check-restricted-syntax.mjs",
+        "lint:fix": "oxlint src tests scripts --fix",
         "format": "oxfmt --write",
         "format:check": "oxfmt --check",
         "prepare": "husky"
     },
     "lint-staged": {
-        "*.{ts,tsx,js,jsx}": [
-            "eslint --fix",
+        "*.{ts,tsx,js,jsx,mjs}": [
+            "oxlint --fix",
             "oxfmt --write"
         ],
         "*.{ts,tsx}": "node -e \"require('child_process').execSync('pnpm run typecheck',{stdio:'inherit'})\""
@@ -59,26 +59,21 @@
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@eslint/js": "^10.0.1",
         "@types/better-sqlite3": "^9.6.0",
         "@types/dompurify": "^3.0.5",
         "@types/node": "^26.1.1",
         "@types/semver": "^7.8.0",
         "@types/ua-parser-js": "^0.7.39",
-        "@typescript-eslint/eslint-plugin": "^8.64.0",
-        "@typescript-eslint/parser": "^8.64.0",
         "@vitest/coverage-v8": "^4.1.10",
         "drizzle-kit": "^0.31.11",
-        "eslint": "^10.7.0",
-        "eslint-config-prettier": "^10.1.8",
         "happy-dom": "^20.10.6",
         "husky": "^9.1.7",
         "lint-staged": "^17.0.8",
-        "pino-pretty": "^13.1.3",
         "oxfmt": "^0.70.0",
+        "oxlint": "^1.85.0",
+        "pino-pretty": "^13.1.3",
         "tsx": "^4.23.1",
         "typescript": "^6.0.3",
-        "typescript-eslint": "^8.64.0",
         "vite": "^8.1.5",
         "vitest": "^4.1.10"
     }
