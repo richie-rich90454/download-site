@@ -38,7 +38,7 @@ export async function buildApp(services: Services): Promise<FastifyInstance> {
     await cors.registerCors(app, services.config);
     await rateLimit.registerRateLimit(app, services.config);
     await requestLogging.registerRequestLogging(app, services.logger, services.metrics);
-    await swagger.registerSwagger(app);
+    await swagger.registerSwagger(app, services.config, services.logger);
     await staticFiles.registerStatic(app);
 
     await healthRoutes.registerHealthRoutes(app);
