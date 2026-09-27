@@ -1039,6 +1039,105 @@ vitest.describe("buildApp", function () {
         vitest.expect(response.payload).not.toContain('route="/health?');
     });
 
+    vitest.it("verifies a signature over the raw request bytes", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        const app = await appFactory.buildApp(services);
+        // Deliberately awkward spacing and key order. If the body were parsed and re-serialised
+        // before hashing, the bytes would differ and this would be rejected.
+        const payload = '{  "action" : "published",\n  "repository" : { "full_name" : "owner/app1" } }';
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "x-github-delivery": "delivery-raw-bytes",
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+    });
+
+    vitest.it("rejects a webhook whose body was re-serialised", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        const app = await appFactory.buildApp(services);
+        const payload = '{  "action" : "published" }';
+        // Signature over the normalised form, which is what the old implementation hashed.
+        const normalised = JSON.stringify(JSON.parse(payload));
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(normalised).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "x-github-delivery": "delivery-normalised",
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        // This is the bug: the old code hashed the parsed object, so it accepted a signature over
+        // bytes GitHub never sent while rejecting every genuine delivery.
+        vitest.expect(response.statusCode).toBe(401);
+    });
+
+    vitest.it("rejects a replayed delivery id", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        const app = await appFactory.buildApp(services);
+        const payload = JSON.stringify({
+            action: "published",
+            repository: { full_name: "owner/app1" },
+            release: { tag_name: "v1.0.0" }
+        });
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
+        const headers = {
+            "x-hub-signature-256": signature,
+            "x-github-delivery": "delivery-replayed",
+            "content-type": "application/json"
+        };
+
+        const first = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: headers,
+            payload: payload
+        });
+        const second = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: headers,
+            payload: payload
+        });
+
+        vitest.expect(first.statusCode).toBe(200);
+        vitest.expect(second.statusCode).toBe(401);
+    });
+
+    vitest.it("answers 400 when a correctly signed body is not valid JSON", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        const app = await appFactory.buildApp(services);
+        const payload = "{not json";
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "x-github-delivery": "delivery-bad-json",
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        // Signature verified, so the failure is the payload, not the sender.
+        vitest.expect(response.statusCode).toBe(400);
+    });
+
     vitest.it("refuses the api reference without the admin key", async function () {
         const app = await appFactory.buildApp(services);
 
