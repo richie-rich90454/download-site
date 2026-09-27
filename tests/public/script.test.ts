@@ -24,7 +24,7 @@ const SERVER_APPS = [
     { id: "app2", repo: "owner/app2", name: "Desktop Calendar Tracking" }
 ];
 
-function mockFetch(): ReturnType<typeof vi.fn> {
+function mockFetch(): typeof globalThis.fetch {
     const release = {
         tag: "v1.0.0",
         name: "v1.0.0",
@@ -66,11 +66,11 @@ function mockFetch(): ReturnType<typeof vi.fn> {
     });
 }
 
-function mockFetchWithAppNamed(name: string): ReturnType<typeof vi.fn> {
+function mockFetchWithAppNamed(name: string): typeof globalThis.fetch {
     return mockFetchReportingApps([{ id: "app1", repo: "owner/a", name: name }]);
 }
 
-function mockFetchReportingApps(apps: unknown[]): ReturnType<typeof vi.fn> {
+function mockFetchReportingApps(apps: unknown[]): typeof globalThis.fetch {
     return vi.fn().mockImplementation(function (url: string) {
         if (url.indexOf("/api/apps") >= 0) {
             return Promise.resolve(createFetchResponse({ apps: apps }));
@@ -86,7 +86,7 @@ describe("script", function () {
     beforeEach(function () {
         vi.resetModules();
         buildDom();
-        globalThis.fetch = mockFetch() as unknown as typeof globalThis.fetch;
+        globalThis.fetch = mockFetch();
         Object.defineProperty(navigator, "onLine", { value: true, writable: true, configurable: true });
         vi.spyOn(window.history, "replaceState").mockImplementation(function () {
             // no-op to avoid happy-dom origin mismatch
