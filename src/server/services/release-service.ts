@@ -14,6 +14,11 @@ export interface ReleaseFilters {
     includePrerelease?: boolean;
 }
 
+export interface ReleasePage {
+    releases: types.Release[];
+    total: number;
+}
+
 export class ReleaseService {
     private readonly cfg: config.ServerConfig;
     private readonly provider: githubTypes.GitHubProvider;
@@ -67,6 +72,38 @@ export class ReleaseService {
             return this.filterPrereleases(releases);
         }
         return releases;
+    }
+
+    /**
+     * One page of releases, newest first.
+     *
+     * On a warm cache this is two indexed reads - a LIMIT/OFFSET page and a COUNT - instead of
+     * decoding the app's entire history and slicing it in memory, which is what the route used to
+     * do for every request. `total` is the full count, so a client can still show page numbers
+     * without being handed the whole list.
+     */
+    async listReleasesPage(appId: string, filters: ReleaseFilters): Promise<ReleasePage> {
+        this.findApp(appId);
+        const page = filters.page !== undefined ? filters.page : 1;
+        const perPage = filters.perPage !== undefined ? filters.perPage : 30;
+        const includePrerelease = filters.includePrerelease === true;
+        const offset = (page - 1) * perPage;
+        const cached = this.cache.getReleases(appId, { includePrerelease: includePrerelease });
+        if (cached !== undefined && cached.expiresAt > Date.now()) {
+            const paged = this.cache.getReleasePage(appId, perPage, offset, includePrerelease);
+            const total = this.cache.countReleases(appId, includePrerelease);
+            this.logger.debug("Release list cache hit", { app: appId, page: page, count: paged.length });
+            return { releases: paged, total: total };
+        }
+        // Cold or stale: GitHub does the paging, and the total is whatever one page told us.
+        const all = await this.listReleases(appId, filters);
+        const start = Math.min(offset, all.length);
+        const end = Math.min(start + perPage, all.length);
+        const slice: types.Release[] = [];
+        for (let i = start; i < end; i = i + 1) {
+            slice.push(all[i]);
+        }
+        return { releases: slice, total: all.length };
     }
 
     async getLatestRelease(appId: string, includePrerelease: boolean): Promise<types.Release | undefined> {
