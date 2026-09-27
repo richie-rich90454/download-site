@@ -597,6 +597,42 @@ describe("DiskAssetCacheService", function () {
         expect(undici.request).toHaveBeenCalledTimes(1);
     });
 
+    it("bounds how many assets download at once", async function () {
+        // Distinct assets, so the in-flight map cannot collapse them. Without a bound, a burst of
+        // first-time downloads holds a socket, a write stream and a temp file each on a 2 vCPU box.
+        let peak = 0;
+        let active = 0;
+        vi.mocked(undici.request).mockImplementation(function () {
+            active = active + 1;
+            peak = Math.max(peak, active);
+            return new Promise(function (resolve) {
+                setTimeout(function () {
+                    active = active - 1;
+                    resolve(createResponse(Buffer.from("payload")));
+                }, 5);
+            });
+        });
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, {
+            maxSize: 1024 * 1024 * 1024,
+            maxCount: 100,
+            maxAgeMs: 60000,
+            maxCacheableSize: 1024 * 1024 * 1024,
+            cleanupIntervalMs: 0,
+            maxConcurrentDownloads: 2
+        });
+
+        const requests: Array<Promise<unknown>> = [];
+        for (let i = 0; i < 6; i = i + 1) {
+            const asset = createAsset("file-" + String(i) + ".exe", 7, "https://github.com/file-" + String(i) + ".exe");
+            requests.push(cache.getAssetPath("app1", "v1.0.0", asset));
+        }
+        expect(cache.pendingDownloads).toBeGreaterThan(0);
+        await Promise.all(requests);
+
+        expect(peak).toBe(2);
+        expect(cache.pendingDownloads).toBe(0);
+    });
+
     it("aborts download when timeout fires", async function () {
         vi.useFakeTimers();
         try {
@@ -614,9 +650,16 @@ describe("DiskAssetCacheService", function () {
             cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
             const promise = cache.getAssetPath("app1", "v1.0.0", asset);
-            vi.advanceTimersByTime(300001);
+            // Attach the expectation before advancing the clock. The abort fires from inside a
+            // timer callback, and a rejection that nothing is yet listening for is reported as
+            // unhandled even though a handler is attached microseconds later.
+            const assertion = expect(promise).rejects.toThrow("download aborted");
+            // Asynchronous advance: the download waits on a concurrency slot first, so the request
+            // is issued a few microtasks later than the call. A synchronous advance would run the
+            // clock forward before the timeout even exists.
+            await vi.advanceTimersByTimeAsync(300001);
 
-            await expect(promise).rejects.toThrow("download aborted");
+            await assertion;
         } finally {
             vi.useRealTimers();
         }
