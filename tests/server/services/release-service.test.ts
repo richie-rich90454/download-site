@@ -294,6 +294,25 @@ describe("ReleaseService", function () {
         expect(page.total).toBe(1);
     });
 
+    it("refetches one app on demand, bypassing the cache", async function () {
+        provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+        // Warm first, so the cache is demonstrably bypassed rather than merely empty.
+        await service.listReleases("app1", {});
+        const before = cache.getLatestRelease("app1", false);
+        expect(before !== undefined ? before.release.tag : undefined).toBe("v1.0.0");
+
+        provider.setReleases([createGitHubRelease("v2.0.0", "2024-06-01T00:00:00Z")]);
+        await service.refreshApp("app1");
+
+        // The webhook path exists so the first user after a release does not see the old data.
+        const after = cache.getLatestRelease("app1", false);
+        expect(after !== undefined ? after.release.tag : undefined).toBe("v2.0.0");
+    });
+
+    it("refuses to refresh an app it does not serve", async function () {
+        await expect(service.refreshApp("not-configured")).rejects.toThrow();
+    });
+
     it("lists releases from provider on cache miss", async function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
 
