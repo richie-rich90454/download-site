@@ -13,26 +13,26 @@ SaaS-grade download server with GitHub releases, asset caching, and updater endp
 2. Add a valid `GITHUB_TOKEN` and configure the `APPS` array with your repositories.
 3. Install dependencies:
     ```sh
-    npm install
+    pnpm install
     ```
 
 ## Development
 
 ```sh
-npm run dev:public   # Vite dev server for the frontend
-npm test             # Run the test suite
-npm run test -- --coverage  # Run tests with coverage
-npm run lint         # Run ESLint
-npm run typecheck    # Run TypeScript type checking
-npm run format       # Format code with Prettier
+pnpm run dev:public   # Vite dev server for the frontend
+pnpm test             # Run the test suite
+pnpm run test -- --coverage  # Run tests with coverage
+pnpm run lint         # Run ESLint
+pnpm run typecheck    # Run TypeScript type checking
+pnpm run format       # Format code with oxfmt
 ```
 
 ## Production
 
 ```sh
-npm run build        # Build server and public assets
-npm run start        # Run the built server
-npm run prod         # Build and start in one command
+pnpm run build        # Build server and public assets
+pnpm run start        # Run the built server
+pnpm run prod         # Build and start in one command
 ```
 
 ## Architecture Overview
