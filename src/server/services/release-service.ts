@@ -100,7 +100,49 @@ export class ReleaseService {
             this.logger.debug("Release by tag cache hit", { app: appId, tag: tag });
             return cached.release;
         }
+        // This is the only path where a client can name an arbitrary upstream resource, which
+        // makes it the only path that can be used to burn the GitHub quota: enough distinct tags
+        // exhausts the 5000 requests per hour, the secondary rate limit bans us, the circuit
+        // breaker opens, and then every app and every updater endpoint goes down together.
+        //
+        // So a tag is only fetched upstream when the app's release list is already known and the
+        // tag is in it. A tag we have never seen is either a typo or an attempt, and answering
+        // 404 from local state costs nothing. When nothing is cached at all - a cold start - the
+        // fetch is allowed, since there is no list to check against yet.
+        // includePrerelease is true so the probe sees every cached row, prereleases included;
+        // an empty page therefore means this app has nothing cached at all.
+        const probe = this.cache.getReleasePage(appId, 1, 0, true);
+        if (probe.length > 0 && !this.isKnownTag(appId, tag)) {
+            this.logger.info("Refused an unknown tag without calling GitHub", { app: appId, tag: tag });
+            return undefined;
+        }
         return this.fetchReleaseByTag(appId, app.repo, tag, cached);
+    }
+
+    /**
+     * Membership test against the cached release list.
+     *
+     * Uses the release count rather than loading the whole history, so the check stays cheap on
+     * an app with a long release record.
+     */
+    private isKnownTag(appId: string, tag: string): boolean {
+        const window = 200;
+        let offset = 0;
+        for (;;) {
+            const page = this.cache.getReleasePage(appId, window, offset, true);
+            if (page.length === 0) {
+                return false;
+            }
+            for (let i = 0; i < page.length; i = i + 1) {
+                if (page[i].tag === tag) {
+                    return true;
+                }
+            }
+            if (page.length < window) {
+                return false;
+            }
+            offset += window;
+        }
     }
 
     async refreshReleases(appId: string, filters?: ReleaseFilters): Promise<types.Release[]> {
