@@ -113,11 +113,29 @@ export class DownloadService {
         return { filePath: cacheResult.filePath, asset: asset, release: releaseObj, proxied: false };
     }
 
-    serveFile(filePath: string, assetName: string, reply: ReplyLike, rangeHeader?: string, checksum?: string): void {
+    /**
+     * Serves a cached file, honouring conditional and range requests.
+     *
+     * Conditional handling is the point of the extra parameters. A download is re-fetched on every
+     * page visit and on every updater poll; without an ETag each of those pulls the whole file
+     * again, which for a 90 MB installer is the single largest avoidable cost on the server.
+     * With one, the client revalidates and gets a 304.
+     */
+    serveFile(
+        filePath: string,
+        assetName: string,
+        reply: ReplyLike,
+        rangeHeader?: string,
+        checksum?: string,
+        ifNoneMatch?: string,
+        ifModifiedSince?: string
+    ): void {
         const stat = fs.statSync(filePath);
         const totalSize = stat.size;
         const contentType = this.getContentType(assetName);
         const safeName = this.safeFilename(assetName);
+        const etag = this.etagFor(checksum, stat);
+        const lastModified = new Date(stat.mtimeMs).toUTCString();
         if (isFastifyReply(reply)) {
             reply.hijack();
         }
@@ -126,11 +144,27 @@ export class DownloadService {
             "Content-Type": contentType,
             "Content-Disposition": 'attachment; filename="' + safeName + '"',
             "Cache-Control": "public, max-age=31536000, immutable",
-            "Accept-Ranges": "bytes"
+            "Accept-Ranges": "bytes",
+            ETag: etag,
+            "Last-Modified": lastModified
         };
         if (checksum !== undefined && checksum.length > 0) {
             headers["X-Checksum-SHA256"] = checksum;
         }
+
+        if (this.isNotModified(etag, lastModified, ifNoneMatch, ifModifiedSince)) {
+            res.statusCode = 304;
+            const notModifiedKeys = Object.keys(headers);
+            for (let i = 0; i < notModifiedKeys.length; i += 1) {
+                res.setHeader(notModifiedKeys[i], headers[notModifiedKeys[i]]);
+            }
+            // A 304 carries no body. Content-Length would describe a body that is not being sent,
+            // and a client is entitled to treat that as a protocol error.
+            res.removeHeader("Content-Length");
+            res.end();
+            return;
+        }
+
         let start = 0;
         let end = totalSize - 1;
         let status = 200;
@@ -171,6 +205,60 @@ export class DownloadService {
             }
         });
         stream.pipe(res);
+    }
+
+    /**
+     * A strong validator for the file.
+     *
+     * The SHA-256 we already computed at download time is the ideal ETag: it identifies the content
+     * exactly, not the particular copy of it. Falling back to size and mtime covers a row written
+     * before the checksum was known, and is the same validator @fastify/send would have produced.
+     */
+    private etagFor(checksum: string | undefined, stat: fs.Stats): string {
+        if (checksum !== undefined && checksum.length > 0) {
+            return '"' + checksum + '"';
+        }
+        return '"' + stat.size.toString(16) + "-" + Math.trunc(stat.mtimeMs).toString(16) + '"';
+    }
+
+    /**
+     * Whether the client already holds this exact file.
+     *
+     * `If-None-Match` wins over `If-Modified-Since` when both are sent, which is what RFC 9110
+     * requires. The date comparison is second-resolution and the ETag is not, so a file modified
+     * inside the same second as the client's copy is only caught by the ETag - which is why the
+     * date is a fallback rather than the check.
+     */
+    private isNotModified(
+        etag: string,
+        lastModified: string,
+        ifNoneMatch: string | undefined,
+        ifModifiedSince: string | undefined
+    ): boolean {
+        if (ifNoneMatch !== undefined && ifNoneMatch.length > 0) {
+            if (ifNoneMatch.trim() === "*") {
+                return true;
+            }
+            const candidates = ifNoneMatch.split(",");
+            for (let i = 0; i < candidates.length; i += 1) {
+                const candidate = candidates[i].trim();
+                if (candidate === etag || candidate === "W/" + etag) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (ifModifiedSince !== undefined && ifModifiedSince.length > 0) {
+            const since = Date.parse(ifModifiedSince);
+            // Both sides in milliseconds. The header is second-resolution and the file's mtime is
+            // not, so the comparison stays strict: a file rewritten inside the client's cached
+            // second is older than the client's copy only in appearance, and the ETag catches it.
+            const modifiedAt = new Date(lastModified).getTime();
+            if (!isNaN(since) && !isNaN(modifiedAt) && since >= modifiedAt) {
+                return true;
+            }
+        }
+        return false;
     }
 
     async proxyDownload(
