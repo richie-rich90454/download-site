@@ -37,6 +37,21 @@ export class SparkleUpdaterService {
             { os: "darwin" as types.Platform, arch: "arm64" }
         ];
         let enclosureXml = "";
+        // Collect first, then resolve every signature in parallel. Resolving inside the loop
+        // made a release with several platform assets pay one blocking upstream fetch per
+        // platform, serially, before the appcast could be sent.
+        const wanted: types.Asset[] = [];
+        for (let i = 0; i < targets.length; i = i + 1) {
+            const asset = this.detector.selectAsset(releaseObj.assets, targets[i]);
+            if (asset === undefined) {
+                continue;
+            }
+            const sigAsset = helpers.findSignatureAsset(releaseObj.assets, asset.name);
+            if (sigAsset !== undefined) {
+                wanted.push(sigAsset);
+            }
+        }
+        const signatures = await helpers.readSignatures(wanted, this.assetCache, context.appId, releaseObj.tag);
         for (let i = 0; i < targets.length; i = i + 1) {
             const target = targets[i];
             const asset = this.detector.selectAsset(releaseObj.assets, target);
@@ -44,9 +59,11 @@ export class SparkleUpdaterService {
                 continue;
             }
             const url = helpers.buildAssetUrl(this.downloadService, context.appId, releaseObj.tag, asset.name);
-            const signature = await this.resolveSignature(releaseObj.assets, asset, context.appId, releaseObj.tag);
+            // The map is keyed by the signature asset's own name, which is the platform asset
+            // name plus the .sig suffix.
+            const signature = signatures.get(asset.name + ".sig");
             const osAttr = target.arch === "arm64" ? "macos-arm64" : "macos";
-            const sigAttr = signature.length > 0 ? ' sparkle:edSignature="' + this.escapeXml(signature) + '"' : "";
+            const sigAttr = signature !== undefined ? ' sparkle:edSignature="' + this.escapeXml(signature) + '"' : "";
             enclosureXml =
                 enclosureXml +
                 '<enclosure url="' +
@@ -90,20 +107,6 @@ export class SparkleUpdaterService {
             "</rss>";
         return { status: 200, body: xml, contentType: "application/xml" };
     }
-
-    private async resolveSignature(
-        assets: types.Asset[],
-        asset: types.Asset,
-        appId: string,
-        version: string
-    ): Promise<string> {
-        const sigAsset = helpers.findSignatureAsset(assets, asset.name);
-        if (sigAsset === undefined) {
-            return "";
-        }
-        return helpers.readSignature(sigAsset, this.assetCache, appId, version);
-    }
-
     /**
      * Release notes are attacker-controlled whenever a mirrored repo is not ours: whoever
      * can edit the release body can edit the appcast. A literal `]]>` closes the CDATA
