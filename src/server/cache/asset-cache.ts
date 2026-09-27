@@ -7,6 +7,7 @@ import * as logger from "../logging/logger.js";
 import * as metrics from "../telemetry/metrics.js";
 import * as egress from "../http/egress.js";
 import { openCacheDatabase, type CacheDatabase } from "../db/client.js";
+import { Semaphore } from "../http/semaphore.js";
 import { assetCache } from "../db/schema/assets.js";
 
 export interface AssetCacheService {
@@ -40,6 +41,11 @@ export interface AssetCacheLimits {
     maxAgeMs: number;
     maxCacheableSize?: number;
     cleanupIntervalMs?: number;
+    /**
+     * How many assets may download at once. Past a handful on a small box, throughput stops
+     * improving and every extra download is holding a socket, a write stream and a temp file.
+     */
+    maxConcurrentDownloads?: number;
 }
 
 export interface AssetCacheStats {
@@ -73,6 +79,7 @@ export class DiskAssetCacheService implements AssetCacheService {
     private readonly limits: AssetCacheLimits;
     private readonly cleanupInterval: ReturnType<typeof setInterval> | undefined;
     private readonly inFlight: Map<string, Promise<AssetCacheResult>>;
+    private readonly downloadSlots: Semaphore;
     private readonly inFlightStats: AssetCacheStats;
     private statsValid: boolean;
 
@@ -98,6 +105,9 @@ export class DiskAssetCacheService implements AssetCacheService {
         if (this.limits.maxCacheableSize === undefined) {
             this.limits.maxCacheableSize = 10 * 1024 * 1024 * 1024;
         }
+        this.downloadSlots = new Semaphore(
+            this.limits.maxConcurrentDownloads === undefined ? 3 : this.limits.maxConcurrentDownloads
+        );
         if (!fs.existsSync(this.cacheDir)) {
             fs.mkdirSync(this.cacheDir, { recursive: true });
         }
@@ -121,9 +131,13 @@ export class DiskAssetCacheService implements AssetCacheService {
         if (existing !== undefined) {
             return existing;
         }
-        const promise = this.resolveAssetPath(app, version, asset);
-        this.inFlight.set(key, promise);
+        // The slot is taken around the resolution, not around the download alone, so a waiter does
+        // not hold a slot while another caller is still verifying the same file.
         const self = this;
+        const promise = this.downloadSlots.run(function () {
+            return self.resolveAssetPath(app, version, asset);
+        });
+        this.inFlight.set(key, promise);
         promise.then(
             function () {
                 self.inFlight.delete(key);
@@ -133,6 +147,11 @@ export class DiskAssetCacheService implements AssetCacheService {
             }
         );
         return promise;
+    }
+
+    /** Downloads waiting for a slot. Exposed so an operator can see the queue is backing up. */
+    get pendingDownloads(): number {
+        return this.downloadSlots.queued;
     }
 
     getChecksum(app: string, version: string, assetName: string): string | undefined {
