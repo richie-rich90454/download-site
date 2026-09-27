@@ -37,6 +37,7 @@ function createTestConfig(): config.ServerConfig {
         rateLimits: { max: 1000, timeWindow: 60000 },
         adminApiKey: undefined,
         webhookSecret: undefined,
+        publicBaseUrl: "http://localhost:3000",
         apps: [
             { id: "app1", repo: "owner/app1", name: "App One" },
             { id: "app2", repo: "owner/app2", name: "App Two" }
@@ -87,6 +88,20 @@ class MockMetadataCache implements metadataCache.MetadataCacheService {
         return undefined;
     }
 
+    // The double is a "no cache" cache: every read misses, which is what the routes that consult
+    // it before a refresh expect. Reporting an empty page and a zero count keeps that honest.
+    getLatestRelease(): metadataCache.ReleaseCacheEntry | undefined {
+        return undefined;
+    }
+
+    getReleasePage(): types.Release[] {
+        return [];
+    }
+
+    countReleases(): number {
+        return 0;
+    }
+
     setReleases(): void {
         // no-op
     }
@@ -134,6 +149,10 @@ class MockAssetCache implements assetCache.AssetCacheService {
 
     getChecksum(): string | undefined {
         return undefined;
+    }
+
+    getStats(): assetCache.AssetCacheStats {
+        return { totalSize: 0, totalCount: 0 };
     }
 
     purge(app?: string, version?: string, assetName?: string): void {
@@ -263,7 +282,7 @@ class MockDownloadService {
             url: "http://example.com/" + assetName,
             browserDownloadUrl: "http://example.com/" + assetName
         };
-        return { filePath: filePath, asset: asset, release: release };
+        return { filePath: filePath, asset: asset, release: release, proxied: false };
     }
 
     serveFile(
