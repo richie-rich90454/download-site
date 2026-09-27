@@ -11,10 +11,10 @@ function createFetchResponse(data: unknown): { ok: boolean; json: () => Promise<
 
 function buildDom(): void {
     document.body.innerHTML =
-        '<div class="container">' +
+        '<div class="container"><div class="window-body">' +
         '<input id="release-search" type="search" />' +
         '<div id="app-grid"></div>' +
-        "</div>" +
+        "</div></div>" +
         '<div id="offline-banner" class="offline-banner is-hidden"></div>';
 }
 
@@ -259,13 +259,14 @@ describe("script", function () {
     });
 
     test("returns early when app-grid is missing", async function () {
-        document.body.innerHTML = '<div class="container"></div>';
+        document.body.innerHTML = '<div class="container"><div class="window-body"></div></div>';
         await import("../../src/public/script.js");
         expect(document.querySelectorAll(".app-card").length).toBe(0);
     });
 
     test("works when search input is missing", async function () {
-        document.body.innerHTML = '<div class="container"><div id="app-grid"></div></div>';
+        document.body.innerHTML =
+            '<div class="container"><div class="window-body"><div id="app-grid"></div></div></div>';
         await import("../../src/public/script.js");
         await new Promise(function (resolve) {
             setTimeout(resolve, 50);
