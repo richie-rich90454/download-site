@@ -1,21 +1,32 @@
 {
+    // The checker. This is the project the editor, `pnpm run typecheck` and everything that needs a
+    // view of the whole codebase use, so it covers both halves of `src` and the whole test suite.
+    // Nothing in it emits: the browser bundle is Vite's job and the server's build is
+    // tsconfig.server.json's, so there is no reason for this project to write a file.
+    //
+    // It is the browser project's config in the sense that matters - it is where the rules for the
+    // served page live, and `target` is ES2015 so nothing in the browser sources can quietly depend
+    // on newer syntax. Vite's own `build.target` is what actually downlevels the shipped bundle;
+    // this setting is what stops the sources acquiring such a dependency in the first place.
+    //
+    // `lib` is deliberately modern rather than ES2015: `target` governs emitted syntax and `lib`
+    // governs which types are visible, and the browser code uses no library API newer than ES2015.
+    // Narrowing lib would add noise without catching anything the tests and the bundle budget do
+    // not already catch.
     "compilerOptions": {
-        "target": "ES2022",
-        "module": "NodeNext",
-        "moduleResolution": "NodeNext",
+        "target": "ES2015",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
         "strict": true,
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
-        "composite": true,
-        "declaration": true,
-        "declarationMap": true,
-        "sourceMap": true
+        "allowJs": true,
+        "noEmit": true,
+        "incremental": true,
+        "tsBuildInfoFile": "./node_modules/.cache/tsconfig.json.tsbuildinfo"
     },
-    "references": [
-        { "path": "./tsconfig.shared.json" },
-        { "path": "./tsconfig.server.json" },
-        { "path": "./tsconfig.public.json" }
-    ],
-    "files": []
+    "include": ["src/**/*.ts", "tests/**/*.ts", "*.ts", "*.mjs"],
+    "exclude": ["node_modules", "dist"]
 }
