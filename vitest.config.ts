@@ -15,7 +15,7 @@ export default defineConfig({
                 statements: 100
             },
             include: ["src/**/*"],
-            exclude: ["src/public/styles/**", "src/server/main.ts", "src/public/index.ts"]
+            exclude: ["src/server/main.ts"]
         }
     }
 });
