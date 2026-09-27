@@ -68,7 +68,9 @@ export default tseslint.config(
         }
     },
     {
-        files: ["src/server/main.ts"],
+        // Both entry points report a fatal problem the only way a browser or a bare node process
+        // can: to the console, where whoever is running it will actually see it.
+        files: ["src/server/main.ts", "src/public/script.ts"],
         rules: {
             "no-console": "off"
         }
