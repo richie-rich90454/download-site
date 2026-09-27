@@ -1039,13 +1039,51 @@ vitest.describe("buildApp", function () {
         vitest.expect(response.payload).not.toContain('route="/health?');
     });
 
-    vitest.it("serves swagger ui", async function () {
+    vitest.it("refuses the api reference without the admin key", async function () {
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({ method: "GET", url: "/docs" });
 
+        // The reference published the full API surface, including the admin header name.
+        vitest.expect(response.statusCode).toBe(403);
+    });
+
+    vitest.it("serves the api reference with the admin key", async function () {
+        services.config.adminApiKey = TEST_ADMIN_KEY;
+        const app = await appFactory.buildApp(services);
+
+        // Scalar redirects /docs to /docs/; follow it the way a browser would.
+        const first = await app.inject({
+            method: "GET",
+            url: "/docs",
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY }
+        });
+        vitest.expect(first.statusCode).toBeLessThan(400);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/docs/",
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY }
+        });
         vitest.expect(response.statusCode).toBe(200);
-        vitest.expect(response.payload).toContain("swagger");
+    });
+
+    vitest.it("serves the openapi document only with the admin key", async function () {
+        const app = await appFactory.buildApp(services);
+        const refused = await app.inject({ method: "GET", url: "/openapi.json" });
+        vitest.expect(refused.statusCode).toBe(403);
+
+        // The guard is built at registration time, so the key must be set before buildApp.
+        services.config.adminApiKey = TEST_ADMIN_KEY;
+        const allowed = await appFactory.buildApp(services);
+        const response = await allowed.inject({
+            method: "GET",
+            url: "/openapi.json",
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY }
+        });
+        vitest.expect(response.statusCode).toBe(200);
+        const document = JSON.parse(response.payload);
+        vitest.expect(document.info.title).toBe("Download Server API");
     });
 
     vitest.it("serves spa fallback for unknown html routes", async function () {
