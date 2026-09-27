@@ -65,14 +65,16 @@ export async function registerWebhookRoutes(app: FastifyInstance): Promise<void>
                 const repoFullName = body.repository !== undefined ? body.repository.full_name : undefined;
                 if (repoFullName !== undefined) {
                     for (let i = 0; i < services.config.apps.length; i = i + 1) {
-                        const app = services.config.apps[i];
-                        if (app.repo === repoFullName) {
+                        // Not named `app`: that is the Fastify instance three scopes up, and a
+                        // shadowed `app` in a handler is a genuinely confusing thing to read.
+                        const configured = services.config.apps[i];
+                        if (configured.repo === repoFullName) {
                             if (body.release !== undefined && body.release.tag_name !== undefined) {
-                                services.metadataCache.invalidateTag(app.id, body.release.tag_name);
+                                services.metadataCache.invalidateTag(configured.id, body.release.tag_name);
                             } else {
-                                services.metadataCache.invalidateApp(app.id);
+                                services.metadataCache.invalidateApp(configured.id);
                             }
-                            prewarm(services, app.id);
+                            prewarm(services, configured.id);
                         }
                     }
                 }
