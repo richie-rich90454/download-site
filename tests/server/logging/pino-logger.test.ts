@@ -16,6 +16,7 @@ vi.mock("pino", function () {
 });
 
 import pino from "pino";
+import * as pinoLogger from "../../../src/server/logging/pino-logger.js";
 import { PinoLogger } from "../../../src/server/logging/pino-logger.js";
 
 describe("PinoLogger", function () {
@@ -25,6 +26,32 @@ describe("PinoLogger", function () {
 
     afterEach(function () {
         vi.clearAllMocks();
+    });
+
+    it("pretty prints outside production", function () {
+        expect(pinoLogger.shouldPrettyPrint({ NODE_ENV: "development" })).toBe(true);
+    });
+
+    it("emits structured JSON in production", function () {
+        // Pretty output costs a worker thread and produces lines no log collector can parse.
+        expect(pinoLogger.shouldPrettyPrint({ NODE_ENV: "production" })).toBe(false);
+    });
+
+    it("lets an operator override the environment either way", function () {
+        expect(pinoLogger.shouldPrettyPrint({ NODE_ENV: "production", LOG_PRETTY: "true" })).toBe(true);
+        expect(pinoLogger.shouldPrettyPrint({ NODE_ENV: "development", LOG_PRETTY: "false" })).toBe(false);
+    });
+
+    it("defaults to no pretty printing when the environment says nothing", function () {
+        expect(pinoLogger.shouldPrettyPrint({})).toBe(true);
+        expect(pinoLogger.shouldPrettyPrint({ LOG_PRETTY: "" })).toBe(false);
+    });
+
+    it("takes the environment from the caller when given one", function () {
+        // An embedder may hold its own environment rather than the process one.
+        expect(function () {
+            return new PinoLogger("info", { NODE_ENV: "production" });
+        }).not.toThrow();
     });
 
     it("creates a pino logger with the configured level", function () {
