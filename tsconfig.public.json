@@ -1,13 +1,18 @@
 {
+    // The browser bundle is built by Vite into dist/public. tsc's output for this project exists
+    // only so `npm run typecheck` can type-check it, so it goes somewhere Vite never publishes.
+    // Sharing dist/public meant a typecheck left unminified, un-bundled .js and .js.map files
+    // sitting in the directory the server serves - and the bundle budget check, which looks for
+    // source maps, reported them as a leak.
     "extends": "./tsconfig.json",
     "compilerOptions": {
         "target": "ES2022",
         "module": "ES2022",
         "moduleResolution": "bundler",
         "lib": ["ES2022", "DOM", "DOM.Iterable"],
-        "outDir": "./dist/public",
+        "outDir": "./dist/.tsc/public",
         "rootDir": "./src/public",
-        "tsBuildInfoFile": "./dist/public/.tsbuildinfo"
+        "tsBuildInfoFile": "./dist/.tsc/public/.tsbuildinfo"
     },
     "include": ["src/public/**/*.ts", "src/public/**/*.d.ts"],
     "exclude": ["node_modules", "dist", "src/server", "src/shared"]
