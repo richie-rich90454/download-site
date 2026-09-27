@@ -999,13 +999,44 @@ vitest.describe("buildApp", function () {
         vitest.expect(response.statusCode).toBe(403);
     });
 
-    vitest.it("exposes metrics", async function () {
+    vitest.it("refuses metrics without the admin key", async function () {
         const app = await appFactory.buildApp(services);
 
         const response = await app.inject({ method: "GET", url: "/metrics" });
 
+        // Metrics enumerate hosted apps, cache hit ratios, GitHub call counts, and the Node heap.
+        vitest.expect(response.statusCode).toBe(403);
+    });
+
+    vitest.it("exposes metrics with the admin key", async function () {
+        services.config.adminApiKey = TEST_ADMIN_KEY;
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/metrics",
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY }
+        });
+
         vitest.expect(response.statusCode).toBe(200);
         vitest.expect(response.payload).toContain("http_requests_total");
+    });
+
+    vitest.it("records http request metrics with a bounded route label", async function () {
+        services.config.adminApiKey = TEST_ADMIN_KEY;
+        const app = await appFactory.buildApp(services);
+        await app.inject({ method: "GET", url: "/health" });
+
+        const response = await app.inject({
+            method: "GET",
+            url: "/metrics",
+            headers: { "x-admin-api-key": TEST_ADMIN_KEY }
+        });
+
+        // Labelled by route template, so distinct ids and query strings cannot create one
+        // time series each.
+        vitest.expect(response.payload).toContain('http_requests_total{method="GET",route="/health",status="200"');
+        vitest.expect(response.payload).not.toContain('route="/health?');
     });
 
     vitest.it("serves swagger ui", async function () {
