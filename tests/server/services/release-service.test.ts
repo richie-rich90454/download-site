@@ -36,8 +36,12 @@ function createConfig(): config.ServerConfig {
         port: 3000,
         cacheDir: "/tmp/cache",
         logLevel: "silent",
+        corsOrigin: "*",
         github: { token: undefined, appId: undefined, privateKey: undefined },
         rateLimits: { max: 100, timeWindow: 60000 },
+        adminApiKey: undefined,
+        webhookSecret: undefined,
+        publicBaseUrl: "http://localhost:3000",
         apps: [{ id: "app1", repo: "owner/repo", name: "App One" }]
     };
 }
@@ -68,6 +72,10 @@ class MockAssetCache implements assetCache.AssetCacheService {
 
     getChecksum(app: string, version: string, assetName: string): string | undefined {
         return this.checksums[app + "/" + version + "/" + assetName];
+    }
+
+    getStats(): assetCache.AssetCacheStats {
+        return { totalSize: 0, totalCount: 0 };
     }
 
     purge(): void {
@@ -329,8 +337,8 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.assets.length).toBe(1);
-        expect(release.assets[0].checksum).toBe("abc123");
+        expect(release !== undefined ? release.assets.length : 0).toBe(1);
+        expect(release !== undefined ? release.assets[0].checksum : undefined).toBe("abc123");
     });
 
     it("uses cached releases when not expired", async function () {
@@ -404,7 +412,7 @@ describe("ReleaseService", function () {
             const result = await service.getReleaseByTag("app1", "v1.1.0");
 
             expect(result).toBeDefined();
-            expect(result.tag).toBe("v1.1.0");
+            expect(result !== undefined ? result.tag : undefined).toBe("v1.1.0");
         });
 
         it("finds a known tag beyond the first page window", async function () {
@@ -464,7 +472,7 @@ describe("ReleaseService", function () {
         const latest = await service.getLatestRelease("app1", false);
 
         expect(latest).toBeDefined();
-        expect(latest.tag).toBe("v1.1.0");
+        expect(latest !== undefined ? latest.tag : undefined).toBe("v1.1.0");
     });
 
     it("sorts releases by descending published date", async function () {
@@ -477,7 +485,7 @@ describe("ReleaseService", function () {
         const latest = await service.getLatestRelease("app1", false);
 
         expect(latest).toBeDefined();
-        expect(latest.tag).toBe("v1.2.0");
+        expect(latest !== undefined ? latest.tag : undefined).toBe("v1.2.0");
     });
 
     it("gets release by tag", async function () {
@@ -486,7 +494,7 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("returns stale cache when refresh fails", async function () {
@@ -497,7 +505,7 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("selects asset for target", async function () {
@@ -506,7 +514,7 @@ describe("ReleaseService", function () {
         const asset = await service.getAssetForTarget("app1", "v1.0.0", { os: "windows", arch: "x64" });
 
         expect(asset).toBeDefined();
-        expect(asset.name).toBe("app-windows.exe");
+        expect(asset !== undefined ? asset.name : undefined).toBe("app-windows.exe");
     });
 
     it("warms cache for all apps", async function () {
@@ -517,7 +525,7 @@ describe("ReleaseService", function () {
         expect(healthService.isReady()).toBe(true);
         const cached = cache.getReleases("app1");
         expect(cached).toBeDefined();
-        expect(cached.releases.length).toBe(1);
+        expect(cached !== undefined ? cached.releases.length : 0).toBe(1);
     });
 
     it("throws for unknown app", async function () {
@@ -584,7 +592,7 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("logs error when warming cache fails for one app", async function () {
@@ -615,7 +623,7 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("returns undefined asset when release is not found", async function () {
@@ -630,19 +638,25 @@ describe("ReleaseService", function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
         const cachedRelease = await service.getReleaseByTag("app1", "v1.0.0");
         expect(cachedRelease).toBeDefined();
+        if (cachedRelease === undefined) {
+            throw new Error("expected a cached release to seed the cache with");
+        }
         cache.setRelease("app1", "v1.0.0", cachedRelease, '"etag"', -1);
         provider.setTagFromCache(true);
 
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("returns stale release when expired tag refresh throws", async function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
         const cachedRelease = await service.getReleaseByTag("app1", "v1.0.0");
         expect(cachedRelease).toBeDefined();
+        if (cachedRelease === undefined) {
+            throw new Error("expected a cached release to seed the cache with");
+        }
         cache.setRelease("app1", "v1.0.0", cachedRelease, '"etag"', -1);
         provider.setThrowOnTag(true);
         provider.setReleases([]);
@@ -650,7 +664,7 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("throws when tag refresh fails without cache", async function () {
@@ -690,13 +704,16 @@ describe("ReleaseService", function () {
         provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
         const cachedRelease = await service.getReleaseByTag("app1", "v1.0.0");
         expect(cachedRelease).toBeDefined();
+        if (cachedRelease === undefined) {
+            throw new Error("expected a cached release to seed the cache with");
+        }
         cache.setRelease("app1", "v1.0.0", cachedRelease, '"etag"', -1);
         provider.setThrowNonErrorOnTag(true);
 
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.tag).toBe("v1.0.0");
+        expect(release !== undefined ? release.tag : undefined).toBe("v1.0.0");
     });
 
     it("logs error when warming cache fails with non-error", async function () {
@@ -722,7 +739,7 @@ describe("ReleaseService", function () {
         const release = await service.getReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.notes).toBe("");
+        expect(release !== undefined ? release.notes : undefined).toBe("");
     });
 
     it("refreshReleases invalidates cache and fetches from provider", async function () {
@@ -772,6 +789,6 @@ describe("ReleaseService", function () {
         const release = await service.refreshReleaseByTag("app1", "v1.0.0");
 
         expect(release).toBeDefined();
-        expect(release.name).toBe("Release v1.0.0 patched");
+        expect(release !== undefined ? release.name : undefined).toBe("Release v1.0.0 patched");
     });
 });
