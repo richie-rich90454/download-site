@@ -201,7 +201,7 @@ describe("app-card", function () {
         });
         const card = createAppCard(store, modal, "randmatqugea", "RandMatQuGeA");
         await card.load();
-        const notesButton = card.element.querySelector(".release-list-item button");
+        const notesButton = card.element.querySelector<HTMLButtonElement>(".release-list-item button");
         expect(notesButton).not.toBe(null);
         if (notesButton !== null) {
             notesButton.click();
@@ -670,7 +670,7 @@ describe("app-card", function () {
         expect(metaPanel).not.toBe(null);
         if (metaPanel !== null) {
             expect(metaPanel.textContent.indexOf("SHA-256: abcdef1234567890...") >= 0).toBe(true);
-            const copyButton = metaPanel.querySelector(".btn-copy");
+            const copyButton = metaPanel.querySelector<HTMLButtonElement>(".btn-copy");
             expect(copyButton).not.toBe(null);
             if (copyButton !== null) {
                 copyButton.click();
@@ -928,7 +928,7 @@ describe("app-card", function () {
         await card.load();
         const state = store.getState();
         state.apps = [];
-        const notesButton = card.element.querySelector(".release-list-item button");
+        const notesButton = card.element.querySelector<HTMLButtonElement>(".release-list-item button");
         expect(notesButton).not.toBe(null);
         if (notesButton !== null) {
             notesButton.click();
