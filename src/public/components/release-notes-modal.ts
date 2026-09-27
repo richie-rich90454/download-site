@@ -1,9 +1,49 @@
 import type { PublicRelease } from "../api-client.js";
 import * as markedNs from "marked";
 import * as DOMPurifyNs from "dompurify";
-import hljs from "highlight.js";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import diff from "highlight.js/lib/languages/diff";
+import ini from "highlight.js/lib/languages/ini";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import plaintext from "highlight.js/lib/languages/plaintext";
+import powershell from "highlight.js/lib/languages/powershell";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import shell from "highlight.js/lib/languages/shell";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
 
 const marked = markedNs.marked;
+
+/**
+ * Only the languages a release note realistically contains.
+ *
+ * Importing the `highlight.js` barrel pulls in every bundled grammar - around 190 of them, and
+ * roughly 1 MB of JavaScript on the critical path for a page whose real content is a version
+ * number and a list of file names. That is a bad trade for anyone on a slow connection, so the
+ * core is used and grammars are registered explicitly.
+ *
+ * `plaintext` is registered as the fallback: an unregistered language degrades to unhighlighted
+ * text rather than throwing, so a note in an unexpected language still renders safely.
+ */
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("css", css);
+hljs.registerLanguage("diff", diff);
+hljs.registerLanguage("ini", ini);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("plaintext", plaintext);
+hljs.registerLanguage("powershell", powershell);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("rust", rust);
+hljs.registerLanguage("shell", shell);
+hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("xml", xml);
 
 function createPurify() {
     return DOMPurifyNs.default(window);
