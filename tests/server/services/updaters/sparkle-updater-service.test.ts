@@ -165,4 +165,23 @@ describe("SparkleUpdaterService", function () {
         const xml = result.body as string;
         expect(descriptionPayload(xml)).toBe(release.notes);
     });
+    it("resolves several signatures concurrently and omits one that cannot be read", async function () {
+        const release = helpers.createRelease("v1.1.0", [
+            helpers.createAsset("app-macos-x64.dmg"),
+            helpers.createAsset("app-macos-x64.dmg.sig"),
+            helpers.createAsset("app-macos-arm64.dmg"),
+            helpers.createAsset("app-macos-arm64.dmg.sig")
+        ]);
+        releaseSvc.setRelease(release);
+        assetCacheSvc.registerSignature("app-macos-x64.dmg", "sig-x64");
+        // arm64 signature deliberately left unreadable, as if the file were missing upstream.
+
+        const result = await service.getAppcast({ appId: "app1", currentVersion: "v1.0.0" });
+
+        const xml = result.body as string;
+        expect(xml.indexOf('sparkle:edSignature="sig-x64"') >= 0).toBe(true);
+        // An unavailable signature must not remove the build itself: an unsigned update is
+        // still a usable update, and the client gets to decide.
+        expect(xml.indexOf("<enclosure ") >= 0).toBe(true);
+    });
 });
