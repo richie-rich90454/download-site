@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import * as webhookVerifier from "../security/webhook-verifier.js";
 import type { Logger } from "../logging/logger.js";
+import type { Services } from "../container.js";
 
 const webhookResponseSchema = {
     type: "object",
@@ -71,12 +72,35 @@ export async function registerWebhookRoutes(app: FastifyInstance): Promise<void>
                             } else {
                                 services.metadataCache.invalidateApp(app.id);
                             }
+                            prewarm(services, app.id);
                         }
                     }
                 }
                 reply.send({ success: true });
             }
         );
+    });
+}
+
+/**
+ * Refetches the app the webhook was about, without making GitHub wait for it.
+ *
+ * Invalidation alone leaves a window where the first user after a release sees the old data, which
+ * for an updater is the difference between "up to date" and "still on the previous version". Doing
+ * the fetch here closes that window for everyone instead of only for whoever asks first.
+ *
+ * Deliberately not awaited: GitHub redelivers on a slow response, and a 5xx here would look like a
+ * failed delivery. The invalidation above has already happened, so a failure costs freshness, not
+ * correctness.
+ */
+function prewarm(services: Services, appId: string): void {
+    services.release.refreshApp(appId).catch(function (err: unknown) {
+        // The error is handed over as-is rather than stringified: the stack is the part that makes
+        // the log actionable.
+        services.logger.warn("Webhook prewarm failed; the next request will fetch instead", {
+            app: appId,
+            error: err
+        });
     });
 }
 
