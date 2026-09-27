@@ -55,7 +55,7 @@ function setupOfflineBanner(): void {
  *
  * Text is inserted as text content, so a display name is never parsed as markup.
  */
-export function renderApiNote(container: HTMLElement, apps: ConfiguredApp[]): void {
+export function renderApiNote(panel: HTMLElement, apps: ConfiguredApp[]): void {
     const note = document.createElement("div");
     note.className = "api-note";
     const label = document.createElement("span");
@@ -71,14 +71,14 @@ export function renderApiNote(container: HTMLElement, apps: ConfiguredApp[]): vo
         code.textContent = "/api/update/" + apps[i].id;
         note.appendChild(code);
     }
-    container.appendChild(note);
+    panel.appendChild(note);
 }
 
-function reportAppListFailure(container: HTMLElement, err: unknown): void {
+function reportAppListFailure(panel: HTMLElement, err: unknown): void {
     const note = document.createElement("div");
     note.className = "api-note";
     note.textContent = "The app list could not be loaded. Refresh to try again, or check the server is running.";
-    container.appendChild(note);
+    panel.appendChild(note);
     // Worth logging: the visible message tells the user what to do, but only this says why it
     // failed, which is what makes the report actionable. Handed the raw value, not a string, so
     // an Error keeps its stack.
@@ -89,7 +89,10 @@ function init(): void {
     const store = createStore();
     const modal = createReleaseNotesModal();
 
-    const container = document.querySelector<HTMLElement>(".container");
+    // The content area, not the window frame. The frame is the glass; the note belongs on the
+    // surface with everything else. Appending to the frame put it outside that surface entirely -
+    // visible over the backdrop, and clipped on a narrow screen.
+    const container = document.querySelector<HTMLElement>(".window-body");
     if (container === null) {
         return;
     }
