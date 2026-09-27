@@ -189,13 +189,14 @@ describe("DownloadService", function () {
     function requestServer(
         filePath: string,
         assetName: string,
-        rangeHeader?: string
+        rangeHeader?: string,
+        checksum?: string
     ): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
         return new Promise(function (resolve) {
             const server = http.createServer(function (req, res) {
                 const range = req.headers.range;
                 const header = rangeHeader !== undefined ? rangeHeader : Array.isArray(range) ? range[0] : range;
-                service.serveFile(filePath, assetName, res, header);
+                service.serveFile(filePath, assetName, res, header, checksum);
             });
             server.listen(0, function () {
                 const address = server.address();
@@ -212,6 +213,79 @@ describe("DownloadService", function () {
                     res.on("end", function () {
                         server.close(function () {
                             resolve({ statusCode: res.statusCode || 0, headers: res.headers, body: body });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    /**
+     * Serves a file while echoing back the conditional headers, so the revalidation path can be
+     * driven the way a browser drives it rather than by calling serveFile directly.
+     */
+    function conditionalServer(
+        filePath: string,
+        assetName: string,
+        sendHeaders: { etag?: string; checksum?: string }
+    ): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
+        return new Promise(function (resolve) {
+            const server = http.createServer(function (req, res) {
+                service.serveFile(
+                    filePath,
+                    assetName,
+                    res,
+                    undefined,
+                    sendHeaders.checksum,
+                    req.headers["if-none-match"],
+                    req.headers["if-modified-since"]
+                );
+            });
+            server.listen(0, function () {
+                const address = server.address();
+                const port = typeof address === "object" && address !== null ? address.port : 0;
+                const headers: Record<string, string> = {};
+                if (sendHeaders.etag !== undefined) {
+                    headers["If-None-Match"] = sendHeaders.etag;
+                }
+                const options: http.RequestOptions = { port: port, path: "/", headers: headers };
+                http.get(options, function (res) {
+                    let body = "";
+                    res.on("data", function (chunk) {
+                        body = body + chunk;
+                    });
+                    res.on("end", function () {
+                        server.close(function () {
+                            resolve({ statusCode: res.statusCode || 0, headers: res.headers, body: body });
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    /** True when the server answered 304 for an If-Modified-Since of `date`. */
+    function conditionalServerWithDate(filePath: string, date: string): Promise<boolean> {
+        return new Promise(function (resolve) {
+            const server = http.createServer(function (req, res) {
+                service.serveFile(
+                    filePath,
+                    "app.exe",
+                    res,
+                    undefined,
+                    undefined,
+                    undefined,
+                    req.headers["if-modified-since"]
+                );
+            });
+            server.listen(0, function () {
+                const address = server.address();
+                const port = typeof address === "object" && address !== null ? address.port : 0;
+                http.get({ port: port, path: "/", headers: { "If-Modified-Since": date } }, function (res) {
+                    res.resume();
+                    res.on("end", function () {
+                        server.close(function () {
+                            resolve(res.statusCode === 304);
                         });
                     });
                 });
@@ -295,6 +369,125 @@ describe("DownloadService", function () {
         expect(result.statusCode).toBe(206);
         expect(result.headers["content-range"]).toBe("bytes 1-3/6");
         expect(result.body).toBe("bcd");
+    });
+
+    it("revalidates with 304 when the client already holds the file", async function () {
+        const filePath = path.join(tempDir, "revalidate.exe");
+        fs.writeFileSync(filePath, "hello world");
+
+        const first = await requestServer(filePath, "app.exe");
+        const etag = first.headers.etag;
+        expect(etag).toBeDefined();
+        expect(first.statusCode).toBe(200);
+
+        const second = await conditionalServer(filePath, "app.exe", { etag: String(etag) });
+        // A download is re-fetched on every page visit. Without this, each one pulls the whole file
+        // again - for a 90 MB installer, the largest avoidable cost on the server.
+        expect(second.statusCode).toBe(304);
+        expect(second.body).toBe("");
+        expect(second.headers["content-length"]).toBeUndefined();
+    });
+
+    it("derives the ETag from the checksum when one is known", async function () {
+        const filePath = path.join(tempDir, "checksummed.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const quoted = '"' + "b".repeat(64) + '"';
+
+        const first = await requestServer(filePath, "app.exe", undefined, "b".repeat(64));
+        // The SHA-256 taken at download time identifies the content exactly, which is stronger than
+        // a size and mtime pair that two different writes could share.
+        expect(first.headers.etag).toBe(quoted);
+
+        const result = await conditionalServer(filePath, "app.exe", {
+            etag: quoted,
+            checksum: "b".repeat(64)
+        });
+        expect(result.statusCode).toBe(304);
+    });
+
+    it("falls back to size and mtime when no checksum is known", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const first = await requestServer(filePath, "app.exe");
+        const etag = String(first.headers.etag);
+        expect(etag.indexOf('"')).toBe(0);
+        // Not the checksum, because there was none.
+        expect(etag).not.toContain("0".repeat(64));
+
+        const second = await conditionalServer(filePath, "app.exe", { etag: etag });
+        expect(second.statusCode).toBe(304);
+    });
+
+    it("sends the file when the ETag does not match", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const result = await conditionalServer(filePath, "app.exe", { etag: '"stale-checksum"' });
+
+        expect(result.statusCode).toBe(200);
+        expect(result.body).toBe("hello world");
+    });
+
+    it("matches a weak ETag sent by an intermediary", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const first = await requestServer(filePath, "app.exe");
+        const etag = String(first.headers.etag);
+
+        const result = await conditionalServer(filePath, "app.exe", { etag: "W/" + etag });
+
+        // A cache that rewrote a strong validator as weak did not change the bytes, so honouring
+        // it is correct and sending the file again is not.
+        expect(result.statusCode).toBe(304);
+    });
+
+    it("matches one ETag from a list", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const first = await requestServer(filePath, "app.exe");
+        const etag = String(first.headers.etag);
+
+        const result = await conditionalServer(filePath, "app.exe", {
+            etag: '"other", ' + etag + ', "another"'
+        });
+
+        expect(result.statusCode).toBe(304);
+    });
+
+    it("treats If-None-Match star as a match", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const result = await conditionalServer(filePath, "app.exe", { etag: "*" });
+
+        expect(result.statusCode).toBe(304);
+    });
+
+    it("revalidates on If-Modified-Since when no ETag is sent", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const first = await requestServer(filePath, "app.exe");
+        const lastModified = String(first.headers["last-modified"]);
+        expect(lastModified).toBeDefined();
+
+        // The date-only check is the fallback. It cannot see a rewrite within the same second, which
+        // is why the ETag is the primary validator.
+        const revalidated = await conditionalServerWithDate(filePath, lastModified);
+        expect(revalidated).toBe(true);
+    });
+
+    it("sends the file when the date is older than the file", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const stale = conditionalServerWithDate(filePath, new Date(Date.now() - 60000).toUTCString());
+        expect(await stale).toBe(false);
+    });
+
+    it("ignores an unparseable If-Modified-Since", async function () {
+        const filePath = path.join(tempDir, "conditional.exe");
+        fs.writeFileSync(filePath, "hello world");
+        const result = await conditionalServerWithDate(filePath, "not a date");
+        // A malformed date must not be read as "unchanged": that would serve an empty body to a
+        // client that has never seen the file.
+        expect(result).toBe(false);
     });
 
     it("returns 416 for invalid range format", async function () {
