@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
+import * as metrics from "../../../src/server/telemetry/metrics.js";
 import * as requestLogging from "../../../src/server/plugins/request-logging.js";
 import { SilentLogger } from "../test-helpers.js";
 
@@ -7,7 +8,7 @@ describe("registerRequestLogging", function () {
     it("uses x-request-id header when present", async function () {
         const app = Fastify({ logger: false });
         const logger = new SilentLogger();
-        await requestLogging.registerRequestLogging(app, logger);
+        await requestLogging.registerRequestLogging(app, logger, new metrics.MetricsService());
         app.get("/test", async function () {
             return "ok";
         });
@@ -25,7 +26,7 @@ describe("registerRequestLogging", function () {
     it("generates request id when header is missing", async function () {
         const app = Fastify({ logger: false });
         const logger = new SilentLogger();
-        await requestLogging.registerRequestLogging(app, logger);
+        await requestLogging.registerRequestLogging(app, logger, new metrics.MetricsService());
         app.get("/test", async function () {
             return "ok";
         });
