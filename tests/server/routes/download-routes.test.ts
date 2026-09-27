@@ -103,7 +103,15 @@ vitest.describe("registerDownloadRoutes", function () {
         });
         vitest
             .expect(downloadService.serveFile)
-            .toHaveBeenCalledWith("/tmp/app.exe", "app.exe", replyResult.reply, "bytes=0-1", "abc123");
+            .toHaveBeenCalledWith(
+                "/tmp/app.exe",
+                "app.exe",
+                replyResult.reply,
+                "bytes=0-1",
+                "abc123",
+                undefined,
+                undefined
+            );
     });
 
     vitest.it("proxies large assets instead of serving from cache", async function () {
