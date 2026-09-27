@@ -48,13 +48,55 @@ describe("static plugin", function () {
         expect(publicDir).toBe(path.resolve(process.cwd(), "dist", "public"));
     });
 
+    it("prefers the built page over the Vite entry", function () {
+        const built = path.resolve(process.cwd(), "dist", "public", "index.html");
+        const viteEntry = path.resolve(process.cwd(), "index.html");
+        const existsSyncFn = function (targetPath: string): boolean {
+            return targetPath === built || targetPath === viteEntry;
+        };
+
+        expect(staticPlugin.resolveIndexPath(existsSyncFn)).toBe(built);
+    });
+
+    it("falls back to the Vite entry when there is no built page", function () {
+        const viteEntry = path.resolve(process.cwd(), "index.html");
+        const existsSyncFn = function (targetPath: string): boolean {
+            return targetPath === viteEntry;
+        };
+
+        // Outside production the repository root holds the Vite entry, whose script tag points at
+        // /src/public/script.ts for the dev server to transform.
+        expect(staticPlugin.resolveIndexPath(existsSyncFn)).toBe(viteEntry);
+    });
+
+    it("serves no page in production when the build is missing", function () {
+        process.env.NODE_ENV = "production";
+        const existsSyncFn = function (): boolean {
+            return false;
+        };
+
+        // Silently serving the Vite entry in production would ship a page whose script tag points at
+        // a path the deployed server does not serve.
+        expect(staticPlugin.resolveIndexPath(existsSyncFn)).toBeUndefined();
+    });
+
+    it("serves no page when none of the candidates exist", function () {
+        const existsSyncFn = function (): boolean {
+            return false;
+        };
+
+        expect(staticPlugin.resolveIndexPath(existsSyncFn)).toBeUndefined();
+    });
+
     it("registers static files", async function () {
         const app = Fastify({ logger: false });
 
         await staticPlugin.registerStatic(app);
 
+        // The plugin serves the directory; the page itself comes from the app's not-found handler,
+        // which is where the built-versus-Vite decision is made.
         const response = await app.inject({ method: "GET", url: "/index.html" });
-        expect(response.statusCode).toBe(200);
+        expect(response.statusCode).toBe(404);
     });
 
     it("serves assets with correct content type", async function () {
