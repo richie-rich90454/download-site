@@ -1,0 +1,977 @@
+/*
+ * One stylesheet.
+ *
+ * Previously split across variables/base/components/utilities and imported by main.css, which Vite
+ * inlined into a single file anyway - so the split bought a layering idea nobody could see and a
+ * per-file convention to keep in step. The design tokens stay as custom properties at the top of
+ * this file for the same reason they were ever variables: one place to change the palette.
+ *
+ * The look is Windows 7 Aero: a glass window floating on a coloured field, pearl chrome, and a
+ * glossy highlight across the top of every surface. Aero is a low-contrast look by nature, so the
+ * glass is decoration and never the only thing between text and its background - content sits on
+ * a near-opaque base, and `prefers-contrast: more` and `prefers-reduced-transparency` both flatten
+ * the glass to solid. Glass that you cannot read is not a design.
+ */
+
+/* ---------------------------------------------------------------- tokens */
+
+:root {
+    /* The Aero field the window sits on. */
+    --aero-field-a: #14364f;
+    --aero-field-b: #1b5e73;
+    --aero-field-c: #2a7a5e;
+
+    --glass: rgba(255, 255, 255, 0.16);
+    --glass-strong: rgba(255, 255, 255, 0.26);
+    --glass-edge: rgba(255, 255, 255, 0.55);
+    --glass-shadow: rgba(0, 12, 24, 0.4);
+
+    /* Content surfaces. Deliberately opaque enough to carry text on their own. */
+    --surface: #f7fafc;
+    --surface-raised: #ffffff;
+    --surface-sunken: #e8eef3;
+
+    --text: #16232e;
+    --text-muted: #4c5a67;
+    --text-on-glass: #ffffff;
+
+    --accent: #0b6fb8;
+    --accent-hover: #0a5f9e;
+    --accent-text: #ffffff;
+
+    --danger: #a4262c;
+    --danger-bg: #fdf3f4;
+    --danger-border: #e0a3a7;
+
+    --ok: #1d6b3f;
+    --ok-bg: #e8f4ec;
+    --ok-border: #a8cbb6;
+
+    --line: rgba(9, 42, 63, 0.16);
+    --line-strong: rgba(9, 42, 63, 0.32);
+
+    /* The pearl highlight that sits along the top of every Aero surface. */
+    --sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 60%);
+
+    --radius: 6px;
+    --radius-window: 8px;
+
+    --shadow-window: 0 24px 60px rgba(0, 10, 20, 0.45), 0 2px 6px rgba(0, 10, 20, 0.3);
+    --shadow-card: 0 2px 8px rgba(0, 12, 24, 0.18);
+    --shadow-raised: 0 1px 3px rgba(0, 12, 24, 0.16);
+
+    --focus-ring: 0 0 0 3px rgba(11, 111, 184, 0.45);
+
+    /* Segoe UI is the Windows 7 system face. It is absent elsewhere, so the stack falls through. */
+    --font-ui: "Segoe UI", Tahoma, "Helvetica Neue", Helvetica, Arial, system-ui, -apple-system, sans-serif;
+    --font-mono: Consolas, "Courier New", ui-monospace, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --aero-field-a: #07161f;
+        --aero-field-b: #0d3446;
+        --aero-field-c: #123f34;
+
+        --glass: rgba(255, 255, 255, 0.1);
+        --glass-strong: rgba(255, 255, 255, 0.18);
+        --glass-edge: rgba(255, 255, 255, 0.3);
+        --glass-shadow: rgba(0, 0, 0, 0.55);
+
+        --surface: #16232b;
+        --surface-raised: #1e2d37;
+        --surface-sunken: #101a21;
+
+        --text: #e8eef2;
+        --text-muted: #a9b8c4;
+
+        --accent: #4aa3df;
+        --accent-hover: #6bb8ec;
+        --accent-text: #06202f;
+
+        --danger: #f2a7a7;
+        --danger-bg: #2b1a1c;
+        --danger-border: #6b3034;
+
+        --ok: #8fd0a8;
+        --ok-bg: #14261c;
+        --ok-border: #2f5540;
+
+        --line: rgba(255, 255, 255, 0.14);
+        --line-strong: rgba(255, 255, 255, 0.26);
+
+        --sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 60%);
+
+        --shadow-window: 0 24px 60px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+        --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
+        --shadow-raised: 0 1px 3px rgba(0, 0, 0, 0.35);
+    }
+}
+
+/*
+ * Frosted glass is a lie on hardware or settings that cannot deliver it - and it is a readability
+ * problem before that. Both of these flatten the field to a solid colour and drop the blur, which
+ * is what the design degrades to gracefully into.
+ */
+@media (prefers-contrast: more), (prefers-reduced-transparency: reduce) {
+    :root {
+        --glass: #2c4a5e;
+        --glass-strong: #36566b;
+        --glass-edge: rgba(255, 255, 255, 0.4);
+        --surface: #ffffff;
+        --surface-raised: #ffffff;
+        --surface-sunken: #e8eef3;
+        --text: #000000;
+        --text-muted: #333333;
+        --line: #000000;
+        --line-strong: #000000;
+    }
+}
+
+/* ------------------------------------------------------------------ base */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 32px 16px 48px;
+
+    /* The Aero field: a soft three-stop wash, no image, so nothing to download. */
+    background:
+        radial-gradient(1200px 700px at 15% 0%, var(--aero-field-b), transparent 70%),
+        radial-gradient(900px 600px at 90% 10%, var(--aero-field-c), transparent 65%),
+        linear-gradient(to bottom, var(--aero-field-a), var(--aero-field-a));
+    background-attachment: fixed;
+}
+
+h1,
+h2,
+h3 {
+    margin: 0;
+    font-weight: 600;
+}
+
+h1 {
+    font-size: 1.15rem;
+    letter-spacing: 0.01em;
+}
+
+h2 {
+    font-size: 1rem;
+}
+
+h3 {
+    font-size: 0.9rem;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible {
+    box-shadow: var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ---------------------------------------------------------------- window */
+
+/*
+ * The whole page is one Aero window. The caption buttons are decoration - aria-hidden, and the
+ * only real one in this document is the release-notes close button, which is a real control.
+ */
+.container {
+    width: 100%;
+    max-width: 900px;
+    border-radius: var(--radius-window);
+    overflow: hidden;
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--shadow-window);
+    position: relative;
+}
+
+/* The pearl title bar. */
+.window-chrome {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.1));
+    border-bottom: 1px solid var(--glass-edge);
+    position: relative;
+}
+
+/* The Aero glow streak along the top of the chrome. */
+.window-chrome::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.window-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #7ec8f0, #2a7ad0 60%, #14508f);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.window-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-on-glass);
+    text-shadow: 0 1px 1px rgba(0, 20, 40, 0.55);
+    flex: 1 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/*
+ * Caption buttons. Shapes and gradients only - a close glyph, a maximise glyph and a minimise
+ * glyph, drawn with box-shadow so no icon font or SVG request is needed. Decorative, so they are
+ * aria-hidden and not focusable: a button that does nothing is worse than no button.
+ */
+.caption-buttons {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.caption-button {
+    width: 22px;
+    height: 18px;
+    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.14));
+    position: relative;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.caption-button::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 8px;
+    height: 1.5px;
+    margin: 0 0 0 -4px;
+    background: var(--text-on-glass);
+    box-shadow: 0 1px 0 rgba(0, 20, 40, 0.35);
+}
+
+.caption-button--max::before {
+    width: 7px;
+    height: 6px;
+    margin: -4px 0 0 -3.5px;
+    background: transparent;
+    border: 1px solid var(--text-on-glass);
+    border-top-width: 2px;
+    box-shadow: none;
+}
+
+.caption-button--min::before {
+    margin: 1px 0 0 -4px;
+}
+
+/* The content area inside the chrome. */
+.window-body {
+    padding: 20px;
+    background: var(--surface);
+}
+
+/* ---------------------------------------------------------------- header */
+
+.title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.subhead {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.search-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 18px;
+}
+
+.search-bar label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.search-bar input[type="search"] {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-strong);
+    background: var(--surface-raised);
+    color: var(--text);
+    box-shadow: inset 0 1px 2px rgba(0, 12, 24, 0.08);
+}
+
+.search-bar input[type="search"]::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
+.search-bar input[type="search"]:hover {
+    border-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ grid */
+
+.app-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    align-items: start;
+}
+
+.app-card {
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    position: relative;
+    transition:
+        box-shadow 120ms ease-out,
+        transform 120ms ease-out;
+}
+
+/* The gloss across the top of a card. */
+.app-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 38px;
+    background: linear-gradient(to bottom, rgba(11, 111, 184, 0.1), rgba(11, 111, 184, 0));
+    pointer-events: none;
+}
+
+.app-card:hover {
+    box-shadow: 0 4px 14px rgba(0, 12, 24, 0.24);
+    transform: translateY(-1px);
+}
+
+.app-card h2 {
+    padding: 12px 14px 8px;
+    color: var(--accent);
+}
+
+.app-card:hover h2 {
+    color: var(--accent-hover);
+}
+
+.app-card__content {
+    padding: 0 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+    font: inherit;
+    font-weight: 600;
+    color: var(--text);
+    padding: 7px 13px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-strong);
+    cursor: pointer;
+    background: linear-gradient(to bottom, #fdfefe, #e4eaef);
+    box-shadow:
+        var(--shadow-raised),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    transition: background 100ms ease-out;
+}
+
+.btn:hover {
+    background: linear-gradient(to bottom, #ffffff, #d6dee6);
+}
+
+.btn:active {
+    background: linear-gradient(to bottom, #dfe6ec, #eef3f7);
+    box-shadow: inset 0 1px 3px rgba(0, 12, 24, 0.18);
+}
+
+.btn-primary {
+    color: var(--accent-text);
+    border-color: #0a5f9e;
+    background: linear-gradient(to bottom, #2e8fd0, var(--accent) 55%, #0a5f9e);
+    box-shadow:
+        var(--shadow-raised),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(to bottom, #4aa1de, var(--accent-hover) 55%, #08528a);
+}
+
+.btn-platform {
+    color: var(--ok);
+    border-color: var(--ok-border);
+    background: linear-gradient(to bottom, #f4fbf6, var(--ok-bg));
+}
+
+.btn-platform:hover {
+    background: linear-gradient(to bottom, #ffffff, #d8ecdf);
+}
+
+.btn-small {
+    font-size: 0.8rem;
+    padding: 4px 9px;
+}
+
+.button-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.version-selector {
+    font: inherit;
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-strong);
+    background: var(--surface-raised);
+    color: var(--text);
+    box-shadow: var(--shadow-raised);
+    max-width: 100%;
+}
+
+/* ---------------------------------------------------------------- panels */
+
+.meta-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: var(--surface-sunken);
+    border: 1px solid var(--line);
+}
+
+.meta-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.meta-item--asset {
+    color: var(--text);
+    word-break: break-all;
+}
+
+.copy-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    background: var(--surface-sunken);
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    overflow: hidden;
+}
+
+.copy-panel code {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------- release list */
+
+.release-list-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.release-list-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+.release-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 190px;
+    overflow-y: auto;
+}
+
+.release-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 9px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    width: 100%;
+}
+
+.release-list-item:hover {
+    background: var(--surface-sunken);
+    border-color: var(--line);
+}
+
+.release-list-item__info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.release-list-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------- api note */
+
+.api-note {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.api-note code {
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--line);
+    color: var(--text);
+}
+
+.api-note code:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* --------------------------------------------------------------- banner */
+
+.offline-banner {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto 12px;
+    padding: 9px 14px;
+    border-radius: var(--radius);
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    color: var(--danger);
+    font-weight: 600;
+    text-align: center;
+}
+
+.offline-banner.is-hidden {
+    display: none !important;
+}
+
+.offline-banner.is-visible {
+    display: block !important;
+}
+
+/* ---------------------------------------------------------------- modal */
+
+.modal-open {
+    overflow: hidden;
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    /* Tinted rather than plain black, so the Aero window still reads as sitting on the field. */
+    background: rgba(6, 20, 32, 0.62);
+    z-index: 100;
+}
+
+.modal-backdrop[style*="flex"] {
+    display: flex;
+}
+
+.modal-dialog {
+    width: 100%;
+    max-width: 760px;
+    max-height: 84vh;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius-window);
+    overflow: hidden;
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--shadow-window);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.1));
+    border-bottom: 1px solid var(--glass-edge);
+    position: relative;
+}
+
+.modal-header::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.modal-title {
+    flex: 1 1 auto;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-on-glass);
+    text-shadow: 0 1px 1px rgba(0, 20, 40, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The one caption button in this document that is a real control. */
+.modal-close {
+    width: 24px;
+    height: 20px;
+    flex: 0 0 auto;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    background: linear-gradient(to bottom, #e6a3a3, #c26a6a 55%, #a8444a);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    position: relative;
+}
+
+.modal-close::before,
+.modal-close::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 11px;
+    height: 1.5px;
+    margin: 0 0 0 -5.5px;
+    background: #ffffff;
+}
+
+.modal-close::before {
+    transform: rotate(45deg);
+}
+
+.modal-close::after {
+    transform: rotate(-45deg);
+}
+
+.modal-close:hover {
+    background: linear-gradient(to bottom, #f0b4b4, #d17575 55%, #b84f55);
+}
+
+.modal-body {
+    padding: 18px 20px 22px;
+    background: var(--surface);
+    overflow-y: auto;
+}
+
+/* ------------------------------------------------------- release notes */
+
+.release-notes h1,
+.release-notes h2,
+.release-notes h3,
+.release-notes h4 {
+    margin: 18px 0 8px;
+    line-height: 1.3;
+}
+
+.release-notes h1:first-child,
+.release-notes h2:first-child,
+.release-notes h3:first-child {
+    margin-top: 0;
+}
+
+.release-notes p,
+.release-notes ul,
+.release-notes ol {
+    margin: 0 0 10px;
+}
+
+.release-notes ul,
+.release-notes ol {
+    padding-left: 22px;
+}
+
+.release-notes li {
+    margin-bottom: 3px;
+}
+
+.release-notes a {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.release-notes code {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--line);
+}
+
+.release-notes pre {
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    background: var(--surface-sunken);
+    border: 1px solid var(--line);
+    overflow-x: auto;
+    margin: 0 0 12px;
+}
+
+.release-notes pre code {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.release-notes blockquote {
+    margin: 0 0 12px;
+    padding: 4px 0 4px 14px;
+    border-left: 3px solid var(--line-strong);
+    color: var(--text-muted);
+}
+
+/* ----------------------------------------------------------- skeletons */
+
+.loading {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.skeleton-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skeleton,
+.skeleton-row,
+.skeleton-pill {
+    background: linear-gradient(90deg, var(--surface-sunken) 25%, var(--surface-raised) 37%, var(--surface-sunken) 63%);
+    background-size: 400% 100%;
+    border-radius: 4px;
+    animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+.skeleton {
+    height: 14px;
+}
+
+.skeleton-row {
+    height: 12px;
+}
+
+.skeleton-row--short {
+    width: 55%;
+}
+
+.skeleton-actions {
+    display: flex;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+.skeleton-pill {
+    height: 28px;
+    width: 110px;
+    border-radius: var(--radius);
+}
+
+@keyframes skeleton-sweep {
+    0% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0 50%;
+    }
+}
+
+/* --------------------------------------------------------- error state */
+
+.error-boundary {
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    color: var(--danger);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.error-boundary strong {
+    font-size: 0.9rem;
+}
+
+/* ------------------------------------------------------------ utilities */
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.is-hidden {
+    display: none !important;
+}
+
+.is-visible {
+    display: block !important;
+}
+
+.text-muted {
+    color: var(--text-muted);
+}
+
+.text-center {
+    text-align: center;
+}
+
+.mt-1 {
+    margin-top: 8px;
+}
+
+.mt-2 {
+    margin-top: 16px;
+}
+
+.mb-1 {
+    margin-bottom: 8px;
+}
+
+.mb-2 {
+    margin-bottom: 16px;
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 620px) {
+    body {
+        padding: 0;
+    }
+
+    .container {
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .window-body {
+        padding: 16px 14px 22px;
+    }
+
+    .app-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (prefers-contrast: more) {
+    .app-card,
+    .subhead,
+    .api-note,
+    .search-bar,
+    .btn,
+    .meta-panel,
+    .copy-panel {
+        border: 2px solid currentColor;
+    }
+
+    .app-card::before,
+    .window-chrome::after,
+    .modal-header::after {
+        display: none;
+    }
+}
