@@ -31,6 +31,33 @@ export interface UpdateResponse {
     assets: PublicAsset[];
 }
 
+/** An app as configured on the server. The server is the only source of this list. */
+export interface ConfiguredApp {
+    id: string;
+    repo: string;
+    name: string;
+}
+
+export interface AppsResponse {
+    apps: ConfiguredApp[];
+}
+
+/**
+ * Fetches the configured app list.
+ *
+ * The page used to carry a hardcoded copy, which meant adding an app on the server silently
+ * failed to appear until the frontend was rebuilt and redeployed. Reading it means the server's
+ * configuration is the single source of truth.
+ */
+export async function fetchApps(): Promise<ConfiguredApp[]> {
+    const response = await fetch("/api/apps");
+    if (!response.ok) {
+        throw new Error("Failed to load the app list: " + response.statusText);
+    }
+    const data = (await response.json()) as AppsResponse;
+    return data.apps;
+}
+
 export async function fetchReleases(appName: string): Promise<PublicRelease[]> {
     const url = "/api/releases/" + encodeURIComponent(appName) + "?per_page=100";
     const response = await fetch(url);
