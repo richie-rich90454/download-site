@@ -4,6 +4,9 @@
     "description": "",
     "main": "dist/server/main.js",
     "type": "module",
+    "engines": {
+        "node": ">=22.12.0"
+    },
     "scripts": {
         "build": "npm run build:server && npm run build:public",
         "build:server": "tsc -b",
