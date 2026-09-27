@@ -385,6 +385,28 @@ describe("loadConfig", function () {
         expect(cfg.github.privateKey).toBeUndefined();
         expect(cfg.rateLimits.max).toBe(100);
         expect(cfg.rateLimits.timeWindow).toBe(60000);
+        expect(cfg.rateLimits.burst).toBeUndefined();
+
+        fs.unlinkSync(configPath);
+        fs.rmdirSync(tempDir);
+    });
+
+    it("reads a burst from the config file override", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-"));
+        const configPath = path.join(tempDir, "override.json");
+        const override = { rateLimits: { max: 200, timeWindow: 30000, burst: 25 } };
+        fs.writeFileSync(configPath, JSON.stringify(override));
+        process.env.CONFIG_PATH = configPath;
+
+        const cfg = config.loadConfig();
+
+        expect(cfg.rateLimits.max).toBe(200);
+        expect(cfg.rateLimits.timeWindow).toBe(30000);
+        expect(cfg.rateLimits.burst).toBe(25);
 
         fs.unlinkSync(configPath);
         fs.rmdirSync(tempDir);
