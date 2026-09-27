@@ -638,10 +638,9 @@ describe("DiskAssetCacheService", function () {
         try {
             const asset = createAsset("app.exe", 5, "https://github.com/app.exe");
             vi.mocked(undici.request).mockImplementation(function (_url, options) {
-                const signal = options === undefined ? undefined : options.signal;
                 return new Promise(function (_resolve, reject) {
-                    if (signal !== undefined) {
-                        signal.addEventListener("abort", function () {
+                    if (options !== undefined && options.signal instanceof AbortSignal) {
+                        options.signal.addEventListener("abort", function () {
                             reject(new Error("download aborted"));
                         });
                     }
@@ -804,7 +803,9 @@ describe("DiskAssetCacheService", function () {
             const readStreamSpy = vi.spyOn(fs, "createReadStream").mockImplementation(function () {
                 const failing = new stream.Readable({
                     read: function () {
-                        this.destroy("EIO as a bare string");
+                        // The cast is the point of the test: a stream failure that is not an Error,
+                        // which destroy()'s signature has no way to express.
+                        this.destroy("EIO as a bare string" as unknown as Error);
                     }
                 });
                 return failing as unknown as fs.ReadStream;
@@ -905,13 +906,17 @@ describe("DiskAssetCacheService", function () {
         `);
         legacy.close();
 
-        const cache = new assetCache.DiskAssetCacheService(legacyDir, new SilentLogger(), new metrics.MetricsService());
+        const rebuilt = new assetCache.DiskAssetCacheService(
+            legacyDir,
+            new SilentLogger(),
+            new metrics.MetricsService()
+        );
         try {
             // Nothing carried over, and the service is usable against the rebuilt schema.
-            expect(cache.getStats().totalCount).toBe(0);
-            expect(cache.getChecksum("app1", "v1.0.0", "app.exe")).toBeUndefined();
+            expect(rebuilt.getStats().totalCount).toBe(0);
+            expect(rebuilt.getChecksum("app1", "v1.0.0", "app.exe")).toBeUndefined();
         } finally {
-            cache.close();
+            rebuilt.close();
         }
     });
 
@@ -921,7 +926,12 @@ describe("DiskAssetCacheService", function () {
         // delete the operator's directory and retry forever, so it has to surface.
         fs.mkdirSync(path.join(brokenDir, "assets.db"));
         expect(function () {
-            new assetCache.DiskAssetCacheService(brokenDir, new SilentLogger(), new metrics.MetricsService());
+            const opened = new assetCache.DiskAssetCacheService(
+                brokenDir,
+                new SilentLogger(),
+                new metrics.MetricsService()
+            );
+            expect(opened).toBeDefined();
         }).toThrow();
     });
 });
