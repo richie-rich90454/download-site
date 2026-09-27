@@ -114,7 +114,7 @@ describe("updater-helpers", function () {
         const sig = helpers.findSignatureAsset(assets, "app.exe");
 
         expect(sig).toBeDefined();
-        expect(sig.name).toBe("app.exe.sig");
+        expect(sig !== undefined ? sig.name : undefined).toBe("app.exe.sig");
     });
 
     it("returns undefined when signature asset is missing", function () {
