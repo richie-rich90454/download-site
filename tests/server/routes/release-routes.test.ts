@@ -73,7 +73,7 @@ vitest.describe("registerReleaseRoutes", function () {
     }
 
     vitest.it("uses default page and perPage when query omits them", async function () {
-        const releaseServiceMock = { listReleases: vitest.vi.fn() };
+        const releaseServiceMock = { listReleasesPage: vitest.vi.fn() };
         const services = {
             release: releaseServiceMock,
             logger: new SilentLogger()
@@ -82,14 +82,14 @@ vitest.describe("registerReleaseRoutes", function () {
         await releaseRoutes.registerReleaseRoutes(context.app);
         const handler = context.routes[0].handler as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
         const release = createRelease("v1.0.0");
-        releaseServiceMock.listReleases.mockResolvedValue([release]);
+        releaseServiceMock.listReleasesPage.mockResolvedValue({ releases: [release], total: 1 });
 
         const request = createRequest({ app: "app1" }, {});
         const replyResult = createReply();
 
         await handler(request, replyResult.reply as unknown as FastifyReply);
 
-        vitest.expect(releaseServiceMock.listReleases).toHaveBeenCalledWith("app1", {
+        vitest.expect(releaseServiceMock.listReleasesPage).toHaveBeenCalledWith("app1", {
             page: 1,
             perPage: 30,
             includePrerelease: false
@@ -99,5 +99,35 @@ vitest.describe("registerReleaseRoutes", function () {
         vitest.expect(body.page).toBe(1);
         vitest.expect(body.perPage).toBe(30);
         vitest.expect(body.total).toBe(1);
+    });
+
+    vitest.it("reports the full count while returning only the page", async function () {
+        const releaseServiceMock = { listReleasesPage: vitest.vi.fn() };
+        const services = {
+            release: releaseServiceMock,
+            logger: new SilentLogger()
+        } as unknown as Services;
+        const context = createFakeApp(services);
+        await releaseRoutes.registerReleaseRoutes(context.app);
+        const handler = context.routes[0].handler as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+        // The whole point of paging through the index: the client learns there are 412 releases
+        // without the server handing it 412 releases' worth of msgpack.
+        releaseServiceMock.listReleasesPage.mockResolvedValue({
+            releases: [createRelease("v4.1.0")],
+            total: 412
+        });
+
+        // Numbers, not strings: Fastify coerces them from the querystring schema before the
+        // handler runs, and this fake skips that step.
+        const request = createRequest({ app: "app1" }, { page: 2, per_page: 1 });
+        const replyResult = createReply();
+
+        await handler(request, replyResult.reply as unknown as FastifyReply);
+
+        const body = replyResult.payload.value as Record<string, unknown>;
+        vitest.expect(body.total).toBe(412);
+        vitest.expect((body.releases as unknown[]).length).toBe(1);
+        vitest.expect(body.page).toBe(2);
+        vitest.expect(body.perPage).toBe(1);
     });
 });
