@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as stream from "node:stream";
 import * as undici from "undici";
+import type { FastifyReply } from "fastify";
 import * as types from "../../../src/shared/types.js";
 import * as metrics from "../../../src/server/telemetry/metrics.js";
 import * as downloadService from "../../../src/server/services/download-service.js";
@@ -67,6 +68,10 @@ class MockAssetCache implements assetCache.AssetCacheService {
 
     getChecksum(): string | undefined {
         return undefined;
+    }
+
+    getStats(): assetCache.AssetCacheStats {
+        return { totalSize: 0, totalCount: 0 };
     }
 
     purge(): void {
@@ -1193,9 +1198,11 @@ describe("DownloadService", function () {
         vi.useFakeTimers();
         vi.mocked(undici.request).mockImplementationOnce(function (_url, options) {
             return new Promise(function (_resolve, reject) {
-                options.signal.addEventListener("abort", function () {
-                    reject(new Error("aborted"));
-                });
+                if (options !== undefined && options.signal instanceof AbortSignal) {
+                    options.signal.addEventListener("abort", function () {
+                        reject(new Error("aborted"));
+                    });
+                }
             });
         });
 
