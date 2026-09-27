@@ -8,6 +8,7 @@
         "build": "npm run build:server && npm run build:public",
         "build:server": "tsc -b",
         "build:public": "vite build",
+        "check:bundle": "node scripts/check-bundle-budget.mjs",
         "typecheck": "tsc -b",
         "dev:public": "vite",
         "start": "node dist/server/main.js",
