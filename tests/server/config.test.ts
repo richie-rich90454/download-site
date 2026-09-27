@@ -195,7 +195,7 @@ describe("loadConfig", function () {
 
         const cfg = config.loadConfig();
 
-        expect(cfg.assetCache.maxCacheableSize).toBe(2048);
+        expect(cfg.assetCache !== undefined ? cfg.assetCache.maxCacheableSize : undefined).toBe(2048);
     });
 
     it("throws when PORT is missing", function () {
