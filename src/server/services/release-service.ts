@@ -106,6 +106,20 @@ export class ReleaseService {
         return { releases: slice, total: all.length };
     }
 
+    /**
+     * Refetches one app's releases, bypassing the cache.
+     *
+     * Used by the webhook path, where the whole point is that the cache is already known to be
+     * stale. Going through the normal read would find the entry it was just told to distrust.
+     */
+    async refreshApp(appId: string): Promise<void> {
+        const app = this.findApp(appId);
+        const result = await this.provider.listReleases(app.repo, { page: 1, perPage: 100 });
+        const releases = this.transformReleases(appId, result.data);
+        this.cache.setReleases(appId, releases, result.etag, this.defaultTtlSeconds);
+        this.logger.info("Refreshed releases on demand", { app: appId, count: releases.length });
+    }
+
     async getLatestRelease(appId: string, includePrerelease: boolean): Promise<types.Release | undefined> {
         // O(1): the cache holds a pointer to the newest release, so this no longer decodes and
         // sorts the app's entire history on every updater poll.
