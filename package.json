@@ -12,6 +12,8 @@
         "build:server": "tsc -b",
         "build:public": "vite build",
         "check:bundle": "node scripts/check-bundle-budget.mjs",
+        "db:check": "drizzle-kit check",
+        "db:generate": "drizzle-kit generate",
         "typecheck": "tsc -b",
         "dev:public": "vite",
         "start": "node dist/server/main.js",
