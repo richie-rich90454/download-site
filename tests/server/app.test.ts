@@ -8,7 +8,6 @@ import type { Services } from "../../src/server/container.js";
 import * as appFactory from "../../src/server/app.js";
 import * as config from "../../src/server/config/config.js";
 import * as metrics from "../../src/server/telemetry/metrics.js";
-import * as tracing from "../../src/server/telemetry/tracing.js";
 import * as platform from "../../src/server/platform/platform-detector.js";
 import * as releaseService from "../../src/server/services/release-service.js";
 import * as downloadService from "../../src/server/services/download-service.js";
@@ -357,7 +356,6 @@ function buildTestServices(): Services {
         config: cfg,
         logger: new SilentLogger(),
         metrics: new metrics.MetricsService(),
-        telemetry: new tracing.TelemetryService(),
         health: healthSvc,
         githubProvider: {} as githubTypes.GitHubProvider,
         metadataCache: metadataCacheSvc,
