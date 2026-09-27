@@ -1,143 +1,1 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import * as types from "../../../src/shared/types.js";
-import * as metadataCache from "../../../src/server/cache/metadata-cache.js";
-import { SilentLogger } from "../test-helpers.js";
-
-function createRelease(tag: string, prerelease: boolean): types.Release {
-    return {
-        tag: tag,
-        name: "Release " + tag,
-        notes: "Notes for " + tag,
-        publishedAt: "2024-01-01T00:00:00Z",
-        prerelease: prerelease,
-        assets: []
-    };
-}
-
-describe("SqliteMetadataCacheService", function () {
-    let tempDir: string;
-    let cache: metadataCache.SqliteMetadataCacheService;
-
-    beforeEach(function () {
-        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-metadata-"));
-        cache = new metadataCache.SqliteMetadataCacheService(tempDir, new SilentLogger());
-    });
-
-    afterEach(function () {
-        cache.close();
-        fs.rmSync(tempDir, { recursive: true, force: true });
-    });
-
-    it("returns undefined for missing releases", function () {
-        const result = cache.getReleases("app1");
-
-        expect(result).toBeUndefined();
-    });
-
-    it("stores and retrieves releases", function () {
-        const releases = [createRelease("v1.0.0", false)];
-
-        cache.setReleases("app1", releases, '"etag1"', 60);
-        const result = cache.getReleases("app1");
-
-        expect(result).toBeDefined();
-        expect(result.releases.length).toBe(1);
-        expect(result.releases[0].tag).toBe("v1.0.0");
-        expect(result.etag).toBe('"etag1"');
-        expect(result.expiresAt > Date.now()).toBe(true);
-    });
-
-    it("stores and retrieves a release by tag", function () {
-        const release = createRelease("v1.0.0", false);
-
-        cache.setRelease("app1", "v1.0.0", release, '"etag1"', 60);
-        const result = cache.getReleaseByTag("app1", "v1.0.0");
-
-        expect(result).toBeDefined();
-        expect(result.release.tag).toBe("v1.0.0");
-        expect(result.etag).toBe('"etag1"');
-    });
-
-    it("filters prereleases when requested", function () {
-        const releases = [createRelease("v1.0.0", false), createRelease("v2.0.0-beta", true)];
-
-        cache.setReleases("app1", releases, undefined, 60);
-        const result = cache.getReleases("app1", { includePrerelease: false });
-
-        expect(result.releases.length).toBe(1);
-        expect(result.releases[0].tag).toBe("v1.0.0");
-    });
-
-    it("includes prereleases when requested", function () {
-        const releases = [createRelease("v1.0.0", false), createRelease("v2.0.0-beta", true)];
-
-        cache.setReleases("app1", releases, undefined, 60);
-        const result = cache.getReleases("app1", { includePrerelease: true });
-
-        expect(result.releases.length).toBe(2);
-    });
-
-    it("invalidates by app", function () {
-        cache.setReleases("app1", [createRelease("v1.0.0", false)], undefined, 60);
-        cache.setReleases("app2", [createRelease("v1.0.0", false)], undefined, 60);
-
-        cache.invalidateApp("app1");
-
-        expect(cache.getReleases("app1")).toBeUndefined();
-        expect(cache.getReleases("app2")).toBeDefined();
-    });
-
-    it("invalidates by tag", function () {
-        cache.setRelease("app1", "v1.0.0", createRelease("v1.0.0", false), undefined, 60);
-        cache.setRelease("app1", "v1.1.0", createRelease("v1.1.0", false), undefined, 60);
-
-        cache.invalidateTag("app1", "v1.0.0");
-
-        expect(cache.getReleaseByTag("app1", "v1.0.0")).toBeUndefined();
-        expect(cache.getReleaseByTag("app1", "v1.1.0")).toBeDefined();
-    });
-
-    it("invalidates all", function () {
-        cache.setReleases("app1", [createRelease("v1.0.0", false)], undefined, 60);
-        cache.setReleases("app2", [createRelease("v1.0.0", false)], undefined, 60);
-
-        cache.invalidateAll();
-
-        expect(cache.getReleases("app1")).toBeUndefined();
-        expect(cache.getReleases("app2")).toBeUndefined();
-    });
-
-    it("returns undefined when all releases are filtered out", function () {
-        const releases = [createRelease("v2.0.0-beta", true)];
-
-        cache.setReleases("app1", releases, undefined, 60);
-        const result = cache.getReleases("app1", { includePrerelease: false });
-
-        expect(result).toBeUndefined();
-    });
-
-    it("creates cache directory when it does not exist", function () {
-        const nestedDir = path.join(tempDir, "nested", "cache");
-        const service = new metadataCache.SqliteMetadataCacheService(nestedDir, new SilentLogger());
-
-        expect(fs.existsSync(nestedDir)).toBe(true);
-        service.close();
-    });
-
-    it("updates existing release entry", function () {
-        const release = createRelease("v1.0.0", false);
-        cache.setRelease("app1", "v1.0.0", release, '"etag1"', 60);
-        const updatedRelease = createRelease("v1.0.0", false);
-        updatedRelease.name = "Updated";
-
-        cache.setRelease("app1", "v1.0.0", updatedRelease, '"etag2"', 60);
-        const result = cache.getReleaseByTag("app1", "v1.0.0");
-
-        expect(result).toBeDefined();
-        expect(result.release.name).toBe("Updated");
-        expect(result.etag).toBe('"etag2"');
-    });
-});
+import { describe, it, expect, beforeEach, afterEach } from "vitest";import * as fs from "node:fs";import * as os from "node:os";import * as path from "node:path";import * as types from "../../../src/shared/types.js";import * as metadataCache from "../../../src/server/cache/metadata-cache.js";import Database from "better-sqlite3";import * as msgpackr from "msgpackr";import { SilentLogger } from "../test-helpers.js";function createRelease(tag: string, prerelease: boolean, publishedAt?: string): types.Release {    return {        tag: tag,        name: "Release " + tag,        notes: "Notes for " + tag,        publishedAt: publishedAt !== undefined ? publishedAt : "2024-01-01T00:00:00Z",        prerelease: prerelease,        assets: []    };}describe("SqliteMetadataCacheService", function () {    let tempDir: string;    let cache: metadataCache.SqliteMetadataCacheService;    beforeEach(function () {        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-metadata-"));        cache = new metadataCache.SqliteMetadataCacheService(tempDir, new SilentLogger());    });    afterEach(function () {        cache.close();        fs.rmSync(tempDir, { recursive: true, force: true });    });    it("returns undefined for missing releases", function () {        const result = cache.getReleases("app1");        expect(result).toBeUndefined();    });    it("stores and retrieves releases", function () {        const releases = [createRelease("v1.0.0", false)];        cache.setReleases("app1", releases, '"etag1"', 60);        const result = cache.getReleases("app1");        expect(result).toBeDefined();        expect(result.releases.length).toBe(1);        expect(result.releases[0].tag).toBe("v1.0.0");        expect(result.etag).toBe('"etag1"');        expect(result.expiresAt > Date.now()).toBe(true);    });    it("stores and retrieves a release by tag", function () {        const release = createRelease("v1.0.0", false);        cache.setRelease("app1", "v1.0.0", release, '"etag1"', 60);        const result = cache.getReleaseByTag("app1", "v1.0.0");        expect(result).toBeDefined();        expect(result.release.tag).toBe("v1.0.0");        expect(result.etag).toBe('"etag1"');    });    it("filters prereleases when requested", function () {        const releases = [createRelease("v1.0.0", false), createRelease("v2.0.0-beta", true)];        cache.setReleases("app1", releases, undefined, 60);        const result = cache.getReleases("app1", { includePrerelease: false });        expect(result.releases.length).toBe(1);        expect(result.releases[0].tag).toBe("v1.0.0");    });    it("includes prereleases when requested", function () {        const releases = [createRelease("v1.0.0", false), createRelease("v2.0.0-beta", true)];        cache.setReleases("app1", releases, undefined, 60);        const result = cache.getReleases("app1", { includePrerelease: true });        expect(result.releases.length).toBe(2);    });    it("invalidates by app", function () {        cache.setReleases("app1", [createRelease("v1.0.0", false)], undefined, 60);        cache.setReleases("app2", [createRelease("v1.0.0", false)], undefined, 60);        cache.invalidateApp("app1");        expect(cache.getReleases("app1")).toBeUndefined();        expect(cache.getReleases("app2")).toBeDefined();    });    it("invalidates by tag", function () {        cache.setRelease("app1", "v1.0.0", createRelease("v1.0.0", false), undefined, 60);        cache.setRelease("app1", "v1.1.0", createRelease("v1.1.0", false), undefined, 60);        cache.invalidateTag("app1", "v1.0.0");        expect(cache.getReleaseByTag("app1", "v1.0.0")).toBeUndefined();        expect(cache.getReleaseByTag("app1", "v1.1.0")).toBeDefined();    });    it("invalidates all", function () {        cache.setReleases("app1", [createRelease("v1.0.0", false)], undefined, 60);        cache.setReleases("app2", [createRelease("v1.0.0", false)], undefined, 60);        cache.invalidateAll();        expect(cache.getReleases("app1")).toBeUndefined();        expect(cache.getReleases("app2")).toBeUndefined();    });    it("returns undefined when all releases are filtered out", function () {        const releases = [createRelease("v2.0.0-beta", true)];        cache.setReleases("app1", releases, undefined, 60);        const result = cache.getReleases("app1", { includePrerelease: false });        expect(result).toBeUndefined();    });    it("creates cache directory when it does not exist", function () {        const nestedDir = path.join(tempDir, "nested", "cache");        const service = new metadataCache.SqliteMetadataCacheService(nestedDir, new SilentLogger());        expect(fs.existsSync(nestedDir)).toBe(true);        service.close();    });    it("updates existing release entry", function () {        const release = createRelease("v1.0.0", false);        cache.setRelease("app1", "v1.0.0", release, '"etag1"', 60);        const updatedRelease = createRelease("v1.0.0", false);        updatedRelease.name = "Updated";        cache.setRelease("app1", "v1.0.0", updatedRelease, '"etag2"', 60);        const result = cache.getReleaseByTag("app1", "v1.0.0");        expect(result).toBeDefined();        expect(result.release.name).toBe("Updated");        expect(result.etag).toBe('"etag2"');    });    describe("O(1) latest resolution", function () {        it("returns the newest stable release", function () {            cache.setReleases(                "app1",                [                    createRelease("v1.0.0", false, "2024-01-01T00:00:00Z"),                    createRelease("v2.0.0", false, "2024-03-01T00:00:00Z"),                    createRelease("v1.5.0", false, "2024-02-01T00:00:00Z")                ],                undefined,                300            );            const latest = cache.getLatestRelease("app1", false);            expect(latest !== undefined ? latest.release.tag : undefined).toBe("v2.0.0");        });        it("returns the newest release including prereleases for a beta channel", function () {            cache.setReleases(                "app1",                [                    createRelease("v2.0.0", false, "2024-03-01T00:00:00Z"),                    createRelease("v3.0.0-beta.1", true, "2024-04-01T00:00:00Z")                ],                undefined,                300            );            const latest = cache.getLatestRelease("app1", false);            expect(latest !== undefined ? latest.release.tag : undefined).toBe("v2.0.0");            const beta = cache.getLatestRelease("app1", true);            expect(beta !== undefined ? beta.release.tag : undefined).toBe("v3.0.0-beta.1");        });        it("falls back to a scan when no pointer has been written", function () {            cache.setRelease("app1", "v1.0.0", createRelease("v1.0.0", false, "2024-01-01T00:00:00Z"), undefined, 300);            cache.invalidateTag("app1", "v1.0.0");            expect(cache.getLatestRelease("app1", false)).toBeUndefined();        });        it("returns undefined for an unknown app", function () {            expect(cache.getLatestRelease("missing", false)).toBeUndefined();        });        it("returns undefined when the pointer names a deleted release", function () {            cache.setReleases("app1", [createRelease("v1.0.0", false)], undefined, 300);            cache.invalidateApp("app1");            expect(cache.getLatestRelease("app1", false)).toBeUndefined();        });    });    describe("paginated release reads", function () {        it("returns one page newest first", function () {            cache.setReleases(                "app1",                [                    createRelease("v1.0.0", false, "2024-01-01T00:00:00Z"),                    createRelease("v2.0.0", false, "2024-02-01T00:00:00Z"),                    createRelease("v3.0.0", false, "2024-03-01T00:00:00Z")                ],                undefined,                300            );            const first = cache.getReleasePage("app1", 2, 0, false);            expect(first.length).toBe(2);            expect(first[0].tag).toBe("v3.0.0");            expect(first[1].tag).toBe("v2.0.0");        });        it("honours the offset instead of slicing in memory", function () {            cache.setReleases(                "app1",                [                    createRelease("v1.0.0", false, "2024-01-01T00:00:00Z"),                    createRelease("v2.0.0", false, "2024-02-01T00:00:00Z"),                    createRelease("v3.0.0", false, "2024-03-01T00:00:00Z")                ],                undefined,                300            );            const second = cache.getReleasePage("app1", 2, 2, false);            expect(second.length).toBe(1);            expect(second[0].tag).toBe("v1.0.0");        });        it("excludes prereleases from the stable channel", function () {            cache.setReleases(                "app1",                [                    createRelease("v1.0.0", false, "2024-01-01T00:00:00Z"),                    createRelease("v2.0.0-beta.1", true, "2024-02-01T00:00:00Z")                ],                undefined,                300            );            expect(cache.getReleasePage("app1", 10, 0, false).length).toBe(1);            expect(cache.getReleasePage("app1", 10, 0, true).length).toBe(2);        });        it("returns an empty page beyond the end", function () {            cache.setReleases("app1", [createRelease("v1.0.0", false)], undefined, 300);            expect(cache.getReleasePage("app1", 10, 50, false).length).toBe(0);        });    });    it("migrates a database written before the indexed columns existed", function () {        // A separate directory: beforeEach has already created a current-schema database in tempDir.        const legacyDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-legacy-"));        const dbPath = path.join(legacyDir, "metadata.db");        const legacy = new Database(dbPath);        legacy.exec(`            CREATE TABLE releases (                app TEXT NOT NULL,                tag TEXT NOT NULL,                data BLOB NOT NULL,                etag TEXT,                fetched_at INTEGER NOT NULL,                expires_at INTEGER NOT NULL,                PRIMARY KEY (app, tag)            );        `);        legacy.close();        const migrated = new metadataCache.SqliteMetadataCacheService(legacyDir, new SilentLogger());        migrated.close();        const verify = new Database(dbPath, { readonly: true });        const columns = (verify.pragma("table_info(releases)") as { name: string }[]).map(function (c) {            return c.name;        });        const indexes = (verify.pragma("index_list(releases)") as { name: string }[]).map(function (i) {            return i.name;        });        verify.close();        expect(columns).toContain("published_at");        expect(columns).toContain("prerelease");        expect(indexes).toContain("idx_releases_latest");        fs.rmSync(legacyDir, { recursive: true, force: true });    });    it("backfills published_at and prerelease from the serialised body", function () {        const release = createRelease("v1.0.0", true, "2024-05-06T07:08:09Z");        cache.setRelease("app1", "v1.0.0", release, undefined, 300);        const dbPath = path.join(tempDir, "metadata.db");        cache.close();        const raw = new Database(dbPath);        raw.prepare("UPDATE releases SET published_at = 0, prerelease = 0").run();        raw.close();        cache = new metadataCache.SqliteMetadataCacheService(tempDir, new SilentLogger());        const verify = new Database(dbPath, { readonly: true });        const row = verify.prepare("SELECT published_at, prerelease FROM releases").get() as {            published_at: number;            prerelease: number;        };        verify.close();        expect(row.published_at).toBe(Date.parse("2024-05-06T07:08:09Z"));        expect(row.prerelease).toBe(1);    });    it("treats an unparseable published date as the epoch", function () {        cache.setRelease("app1", "v1.0.0", createRelease("v1.0.0", false, "not-a-date"), undefined, 300);        const only = cache.getLatestRelease("app1", false);        expect(only !== undefined ? only.release.tag : undefined).toBe("v1.0.0");    });    it("handles a release set with no usable pointer", function () {        cache.setReleases("app1", [createRelease("v1.0.0", false, "not-a-date")], undefined, 300);        const only = cache.getLatestRelease("app1", false);        expect(only !== undefined ? only.release.tag : undefined).toBe("v1.0.0");    });    it("scans for latest when only a single release was stored, including prereleases", function () {        // setRelease does not write a pointer, so this exercises the scan fallback. The etag is        // null, which is the common case for a tag-scoped fetch.        cache.setRelease(            "app1",            "v2.0.0-beta.1",            createRelease("v2.0.0-beta.1", true, "2024-05-01T00:00:00Z"),            undefined,            300        );        const beta = cache.getLatestRelease("app1", true);        expect(beta !== undefined ? beta.release.tag : undefined).toBe("v2.0.0-beta.1");        expect(beta !== undefined ? beta.etag : "set").toBeUndefined();    });    it("leaves the stable pointer empty when a release set has only prereleases", function () {        cache.setReleases("app1", [createRelease("v1.0.0-beta.1", true, "2024-01-01T00:00:00Z")], undefined, 300);        const stable = cache.getLatestRelease("app1", false);        const beta = cache.getLatestRelease("app1", true);        expect(stable).toBeUndefined();        expect(beta !== undefined ? beta.release.tag : undefined).toBe("v1.0.0-beta.1");    });    it("backfills a legacy row whose published date cannot be parsed", function () {        const legacyDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-legacy2-"));        const dbPath = path.join(legacyDir, "metadata.db");        const legacy = new Database(dbPath);        legacy.exec(`            CREATE TABLE releases (                app TEXT NOT NULL, tag TEXT NOT NULL, data BLOB NOT NULL, etag TEXT,                fetched_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,                PRIMARY KEY (app, tag)            );        `);        legacy            .prepare("INSERT INTO releases (app, tag, data, etag, fetched_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)")            .run("app1", "v1.0.0", msgpackr.pack(createRelease("v1.0.0", false, "not-a-date")), null, 0, 0);        legacy.close();        const migrated = new metadataCache.SqliteMetadataCacheService(legacyDir, new SilentLogger());        migrated.close();        const verify = new Database(dbPath, { readonly: true });        const row = verify.prepare("SELECT published_at, prerelease FROM releases").get() as {            published_at: number;            prerelease: number;        };        verify.close();        expect(row.published_at).toBe(0);        expect(row.prerelease).toBe(0);        fs.rmSync(legacyDir, { recursive: true, force: true });    });    it("returns the stored etag from the scan fallback", function () {        cache.setRelease("app1", "v1.0.0", createRelease("v1.0.0", false, "2024-01-01T00:00:00Z"), 'W/"abc"', 300);        const stable = cache.getLatestRelease("app1", false);        expect(stable !== undefined ? stable.etag : undefined).toBe('W/"abc"');    });});
