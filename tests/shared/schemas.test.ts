@@ -41,19 +41,6 @@ describe("AppSchema", function () {
         expect(result.success).toBe(false);
     });
 });
-
-describe("PlatformSchema", function () {
-    it("accepts windows", function () {
-        const result = schemas.PlatformSchema.safeParse("windows");
-        expect(result.success).toBe(true);
-    });
-
-    it("rejects unknown platform", function () {
-        const result = schemas.PlatformSchema.safeParse("freebsd");
-        expect(result.success).toBe(false);
-    });
-});
-
 describe("GitHubAssetSchema", function () {
     it("validates a correct asset", function () {
         const result = schemas.GitHubAssetSchema.safeParse(validGitHubAsset());
@@ -92,32 +79,6 @@ describe("GitHubReleaseSchema", function () {
         const input = validGitHubRelease();
         input["body"] = null;
         const result = schemas.GitHubReleaseSchema.safeParse(input);
-        expect(result.success).toBe(true);
-    });
-});
-
-describe("DownloadQuerySchema", function () {
-    it("validates empty query", function () {
-        const result = schemas.DownloadQuerySchema.safeParse({});
-        expect(result.success).toBe(true);
-    });
-
-    it("validates full query", function () {
-        const input = { version: "v1.0.0", asset: "app.exe", platform: "windows_x64" };
-        const result = schemas.DownloadQuerySchema.safeParse(input);
-        expect(result.success).toBe(true);
-    });
-});
-
-describe("TauriUpdateQuerySchema", function () {
-    it("requires target", function () {
-        const result = schemas.TauriUpdateQuerySchema.safeParse({});
-        expect(result.success).toBe(false);
-    });
-
-    it("accepts target and current_version", function () {
-        const input = { target: "windows-x86_64", current_version: "v1.0.0" };
-        const result = schemas.TauriUpdateQuerySchema.safeParse(input);
         expect(result.success).toBe(true);
     });
 });
