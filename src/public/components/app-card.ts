@@ -313,6 +313,7 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
         const update = appState.updateData;
         let index = 1;
         if (update !== null) {
+            const labels = labelCollisions(update.assets);
             for (let i = 0; i < update.assets.length; i = i + 1) {
                 const asset = update.assets[i];
                 let link = children[index] as HTMLAnchorElement | undefined;
@@ -322,13 +323,51 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
                     group.appendChild(link);
                 }
                 link.href = buildDownloadUrl(appState.appName, update.version, asset.name);
-                link.textContent = getPlatformLabel(asset.name);
+                const label = getPlatformLabel(asset.name);
+                // One button per asset, because each downloads a different file. But a release
+                // carrying several files the detector cannot tell apart produces several buttons
+                // all reading "Other (x64)", which looks like a rendering fault and says nothing
+                // about which file is about to arrive. When a label repeats, the extension
+                // disambiguates - naming every file rather than dropping the duplicates, which
+                // would silently download a different file than the one advertised.
+                const extension = labels.has(label) ? extensionOf(asset.name) : "";
+                link.textContent = extension.length > 0 ? label + " · " + extension : label;
                 index = index + 1;
             }
         }
         while (children.length > index) {
-            group.removeChild(children[children.length - 1]);
+            group.removeChild(group.lastChild as Node);
         }
+    }
+
+    /**
+     * Which platform labels appear more than once in a set of assets.
+     *
+     * A set, so a label with three assets is still one entry.
+     */
+    function labelCollisions(assets: PublicAsset[]): Set<string> {
+        const counts = new Map<string, number>();
+        for (let i = 0; i < assets.length; i = i + 1) {
+            const label = getPlatformLabel(assets[i].name);
+            const seen = counts.get(label);
+            counts.set(label, seen === undefined ? 1 : seen + 1);
+        }
+        const repeated = new Set<string>();
+        counts.forEach(function (count: number, label: string): void {
+            if (count > 1) {
+                repeated.add(label);
+            }
+        });
+        return repeated;
+    }
+
+    /** The file extension, lowercased and without the dot. Empty when there is not one. */
+    function extensionOf(assetName: string): string {
+        const dot = assetName.lastIndexOf(".");
+        if (dot < 1 || dot === assetName.length - 1) {
+            return "";
+        }
+        return assetName.substring(dot + 1).toLowerCase();
     }
 
     function createMetaPanel(appState: AppState): HTMLElement {
