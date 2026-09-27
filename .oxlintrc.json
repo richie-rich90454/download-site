@@ -1,0 +1,55 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "plugins": ["typescript", "unicorn", "oxc"],
+    "categories": {
+        "correctness": "error",
+        "suspicious": "error",
+        "perf": "error"
+    },
+    "env": {
+        "node": true,
+        "es2024": true,
+        "browser": true
+    },
+    "ignorePatterns": ["dist/**", "node_modules/**", "coverage/**", "public/**"],
+    "rules": {
+        "no-console": "error",
+        "typescript/no-explicit-any": "error",
+        "typescript/no-unused-vars": [
+            "error",
+            {
+                "argsIgnorePattern": "^_",
+                "varsIgnorePattern": "^_",
+                "caughtErrorsIgnorePattern": "^_"
+            }
+        ],
+        "unicorn/consistent-function-scoping": "off",
+        "typescript/no-this-alias": "off",
+        "eslint/no-await-in-loop": "off"
+    },
+    "overrides": [
+        {
+            // Both entry points report a fatal problem the only way a browser or a bare node process
+            // can: to the console, where whoever is running it will actually see it.
+            "files": ["src/server/main.ts", "src/public/script.ts"],
+            "rules": {
+                "no-console": "off"
+            }
+        },
+        {
+            // The nine no-console sites outside the two entry points are the logger implementations
+            // and the test that drives them, where writing to the console is the point.
+            "files": ["src/server/logging/*.ts", "tests/server/logging/*.ts"],
+            "rules": {
+                "no-console": "off"
+            }
+        },
+        {
+            // A build script communicates through stdout and stderr; that is the whole interface.
+            "files": ["scripts/**/*.mjs"],
+            "rules": {
+                "no-console": "off"
+            }
+        }
+    ]
+}
