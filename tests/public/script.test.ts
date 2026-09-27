@@ -18,6 +18,12 @@ function buildDom(): void {
         '<div id="offline-banner" class="offline-banner is-hidden"></div>';
 }
 
+/** The app list the server would report. The page reads this instead of carrying its own copy. */
+const SERVER_APPS = [
+    { id: "app1", repo: "owner/app1", name: "RandMatQuGeA" },
+    { id: "app2", repo: "owner/app2", name: "Desktop Calendar Tracking" }
+];
+
 function mockFetch(): ReturnType<typeof vi.fn> {
     const release = {
         tag: "v1.0.0",
@@ -50,10 +56,26 @@ function mockFetch(): ReturnType<typeof vi.fn> {
         ]
     };
     return vi.fn().mockImplementation(function (url: string) {
+        if (url.indexOf("/api/apps") >= 0) {
+            return Promise.resolve(createFetchResponse({ apps: SERVER_APPS }));
+        }
         if (url.indexOf("/api/releases/") >= 0) {
             return Promise.resolve(createFetchResponse({ releases: [release] }));
         }
         return Promise.resolve(createFetchResponse(update));
+    });
+}
+
+function mockFetchWithAppNamed(name: string): ReturnType<typeof vi.fn> {
+    return mockFetchReportingApps([{ id: "app1", repo: "owner/a", name: name }]);
+}
+
+function mockFetchReportingApps(apps: unknown[]): ReturnType<typeof vi.fn> {
+    return vi.fn().mockImplementation(function (url: string) {
+        if (url.indexOf("/api/apps") >= 0) {
+            return Promise.resolve(createFetchResponse({ apps: apps }));
+        }
+        return Promise.resolve(createFetchResponse({ releases: [] }));
     });
 }
 
@@ -91,6 +113,126 @@ describe("script", function () {
         if (grid !== null) {
             expect(grid.children.length).toBe(2);
         }
+    });
+
+    test("builds the update API links from the app list the server reports", async function () {
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        const note = document.querySelector(".api-note");
+        expect(note).not.toBe(null);
+        if (note === null) {
+            return;
+        }
+        // The whole point: the links are derived from /api/apps, so adding an app on the server
+        // needs no rebuild and there is no second list to fall out of step.
+        expect(note.textContent).toContain("/api/update/app1");
+        expect(note.textContent).toContain("/api/update/app2");
+    });
+
+    test("sends no update links to a server that cannot list its apps", async function () {
+        const failingFetch = vi.fn().mockImplementation(function (url: string) {
+            if (url.indexOf("/api/apps") >= 0) {
+                return Promise.resolve({ ok: false, statusText: "Service Unavailable" });
+            }
+            return Promise.resolve(createFetchResponse({ releases: [] }));
+        });
+        globalThis.fetch = failingFetch;
+
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        // Better to say so than to render links to apps this mirror may not serve.
+        expect(document.querySelectorAll(".api-note code").length).toBe(0);
+        const note = document.querySelector(".api-note");
+        if (note === null) {
+            return;
+        }
+        expect(note.textContent).toContain("could not be loaded");
+    });
+
+    test("renders an app name as text, never as markup", async function () {
+        globalThis.fetch = mockFetchWithAppNamed("<img src=x onerror=alert(1)>");
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        // A display name comes from server config. If it were ever interpolated as HTML it would
+        // be an injection point, so the check is that it landed as a text node.
+        expect(document.querySelectorAll("img").length).toBe(0);
+    });
+
+    test("joins a single app's update link with no separator", async function () {
+        globalThis.fetch = mockFetchReportingApps([{ id: "solo", repo: "owner/solo", name: "Solo" }]);
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        const note = document.querySelector(".api-note");
+        if (note === null) {
+            return;
+        }
+        expect(note.textContent).toBe("Update API: /api/update/solo");
+    });
+
+    test("separates three update links with commas and a final and", async function () {
+        globalThis.fetch = mockFetchReportingApps([
+            { id: "one", repo: "owner/one", name: "One" },
+            { id: "two", repo: "owner/two", name: "Two" },
+            { id: "three", repo: "owner/three", name: "Three" }
+        ]);
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        const note = document.querySelector(".api-note");
+        if (note === null) {
+            return;
+        }
+        expect(note.textContent).toBe("Update API: /api/update/one, /api/update/two and /api/update/three");
+    });
+
+    test("shows the label but no links when the server lists no apps", async function () {
+        globalThis.fetch = mockFetchReportingApps([]);
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        const note = document.querySelector(".api-note");
+        if (note === null) {
+            return;
+        }
+        expect(note.textContent).toBe("Update API: ");
+        expect(document.querySelectorAll(".app-card").length).toBe(0);
+    });
+
+    test("reports a network failure to the console and the page", async function () {
+        const logged = vi.spyOn(console, "error").mockImplementation(function () {
+            // captured below
+        });
+        const rejected = new Error("connection reset");
+        const rejecting = vi.fn().mockImplementation(function () {
+            return Promise.reject(rejected);
+        });
+        globalThis.fetch = rejecting;
+
+        await import("../../src/public/script.js");
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 50);
+        });
+
+        // An unhandled rejection leaves a blank page and no clue. Both the visible message and the
+        // log have to survive, and the log needs the Error itself so the stack is not lost.
+        expect(document.querySelectorAll(".api-note code").length).toBe(0);
+        expect(logged).toHaveBeenCalledWith(rejected);
     });
 
     test("returns early when container is missing", async function () {
@@ -137,8 +279,8 @@ describe("script", function () {
 
     test("selects app and version from query params", async function () {
         vi.stubGlobal("location", {
-            href: "http://localhost:3000/?app=randmatqugea&version=v1.0.0",
-            search: "?app=randmatqugea&version=v1.0.0"
+            href: "http://localhost:3000/?app=app1&version=v1.0.0",
+            search: "?app=app1&version=v1.0.0"
         });
         await import("../../src/public/script.js");
         await new Promise(function (resolve) {
