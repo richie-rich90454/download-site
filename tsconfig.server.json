@@ -1,12 +1,36 @@
 {
-    "extends": "./tsconfig.json",
+    // The builder, and the only project that emits. Everything that ends up in dist/ comes from
+    // here, which is why it covers `src/server` and `src/shared` but not the tests or the browser
+    // sources: `pnpm run typecheck` already covers those, and shipping compiled tests into dist
+    // would put files there that nothing should ever load.
+    //
+    // `target` is ES2023 - the last ECMAScript edition Node 22 implements in full - so nothing is
+    // downlevelled and the emitted code is what V8 actually runs.
+    //
+    // `outDir` is `dist`, not `dist/server`, because `src/shared` sits beside `src/server` in the
+    // tree and the server's own relative imports of `../../shared/*.js` have to keep resolving
+    // against the emitted layout.
+    //
+    // Source maps are on deliberately. This output is never served - the server exposes
+    // dist/public and nothing else - so the maps are a debugging aid rather than a disclosure.
+    // dist/public is the directory that is public, and the bundle budget check guards it.
     "compilerOptions": {
-        "lib": ["ES2022", "DOM"],
-        "outDir": "./dist/server",
-        "rootDir": "./src/server",
-        "tsBuildInfoFile": "./dist/server/.tsbuildinfo"
+        "target": "ES2023",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "lib": ["ES2023"],
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "incremental": true,
+        "tsBuildInfoFile": "./node_modules/.cache/tsconfig.server.json.tsbuildinfo"
     },
-    "include": ["src/server/**/*.ts"],
-    "exclude": ["node_modules", "dist", "src/public"],
-    "references": [{ "path": "./tsconfig.shared.json" }]
+    "include": ["src/server/**/*.ts", "src/shared/**/*.ts"],
+    "exclude": ["node_modules", "dist", "src/public"]
 }
