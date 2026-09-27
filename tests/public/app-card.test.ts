@@ -2,7 +2,7 @@ import { describe, test, expect, vi, afterEach, beforeEach } from "vitest";
 import { createStore } from "../../src/public/state.js";
 import { createReleaseNotesModal } from "../../src/public/components/release-notes-modal.js";
 import { createAppCard } from "../../src/public/components/app-card.js";
-import type { PublicRelease, UpdateResponse } from "../../src/public/api-client.js";
+import type { PublicAsset, PublicRelease, UpdateResponse } from "../../src/public/api-client.js";
 
 function createFetchResponse(data: unknown): { ok: boolean; json: () => Promise<unknown> } {
     return {
@@ -86,6 +86,93 @@ describe("app-card", function () {
             expect(select.options.length).toBe(1);
             expect(select.options[0].value).toBe("v1.0.0");
         }
+    });
+
+    test("disambiguates platform buttons that share a label", async function () {
+        const asset = function (name: string): PublicAsset {
+            return {
+                name: name,
+                size: 100,
+                contentType: "application/octet-stream",
+                url: "http://example.com/" + name,
+                browserDownloadUrl: "http://example.com/" + name
+            };
+        };
+        const release: PublicRelease = {
+            tag: "v1.0.0",
+            name: "v1.0.0",
+            notes: "Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: []
+        };
+        const update: UpdateResponse = {
+            version: "v1.0.0",
+            publishedAt: "2024-01-01T00:00:00Z",
+            releaseNotes: "Notes",
+            // Three x64 files the platform detector cannot tell apart, so all three read
+            // "Other (x64)". Each button downloads a different file, so the extension goes in the
+            // label - dropping the duplicates would quietly hand over a different file than the
+            // one advertised. The last has no extension at all, so its label is left alone rather
+            // than given a trailing separator.
+            assets: [asset("app-1.0.0-x64.tar.gz"), asset("app-1.0.0-x64.bin"), asset("x64-binary")]
+        };
+        fetchMock.mockImplementation(function (url: string) {
+            if (url.indexOf("/api/releases/") >= 0) {
+                return Promise.resolve(createFetchResponse({ releases: [release] }));
+            }
+            return Promise.resolve(createFetchResponse(update));
+        });
+
+        const card = createAppCard(store, modal, "app1", "App One");
+        await card.load();
+
+        const buttons = card.element.querySelectorAll("a.btn-platform");
+        expect(buttons.length).toBe(3);
+        expect(buttons[0].textContent).toBe("Other (x64) · gz");
+        expect(buttons[1].textContent).toBe("Other (x64) · bin");
+        // No extension to show, so the label is left alone rather than given a trailing separator.
+        expect(buttons[2].textContent).toBe("Other (x64)");
+    });
+
+    test("leaves a unique platform label unadorned", async function () {
+        const asset = function (name: string): PublicAsset {
+            return {
+                name: name,
+                size: 100,
+                contentType: "application/octet-stream",
+                url: "http://example.com/" + name,
+                browserDownloadUrl: "http://example.com/" + name
+            };
+        };
+        const release: PublicRelease = {
+            tag: "v1.0.0",
+            name: "v1.0.0",
+            notes: "Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: []
+        };
+        const update: UpdateResponse = {
+            version: "v1.0.0",
+            publishedAt: "2024-01-01T00:00:00Z",
+            releaseNotes: "Notes",
+            assets: [asset("setup.exe"), asset("app.dmg")]
+        };
+        fetchMock.mockImplementation(function (url: string) {
+            if (url.indexOf("/api/releases/") >= 0) {
+                return Promise.resolve(createFetchResponse({ releases: [release] }));
+            }
+            return Promise.resolve(createFetchResponse(update));
+        });
+
+        const card = createAppCard(store, modal, "app1", "App One");
+        await card.load();
+
+        const buttons = card.element.querySelectorAll("a.btn-platform");
+        // Nothing collides, so nothing is appended. The extension is noise on a clear label.
+        expect(buttons[0].textContent).toBe("Windows");
+        expect(buttons[1].textContent).toBe("macOS");
     });
 
     test("renders action buttons from update data", async function () {
