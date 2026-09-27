@@ -3,7 +3,7 @@ import { createReleaseNotesModal } from "./components/release-notes-modal.js";
 import { createAppCard, type AppCard } from "./components/app-card.js";
 import { parseQueryParams, updateQueryParams } from "./query-params.js";
 import { fetchApps, type ConfiguredApp } from "./api-client.js";
-import "./styles/main.css";
+import "./styles.css";
 
 function findAppState(state: GlobalState, appName: string): AppState | null {
     for (let i = 0; i < state.apps.length; i = i + 1) {
