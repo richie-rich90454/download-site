@@ -115,6 +115,8 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
     private throwNonErrorOnTag = false;
     private returnUndefinedForTag = false;
     private returnUndefinedRelease = false;
+    /** Counts upstream list calls so a test can prove a read was served from cache. */
+    listCalls = 0;
 
     setReleases(releases: types.GitHubRelease[]): void {
         this.releases = releases;
@@ -153,6 +155,7 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
     }
 
     async listReleases(): Promise<githubTypes.FetchResult<types.GitHubRelease[]>> {
+        this.listCalls += 1;
         if (this.throwOnList) {
             throw new Error("list error");
         }
@@ -271,6 +274,21 @@ describe("ReleaseService", function () {
         expect(releases[0].tag).toBe("v1.0.0");
     });
 
+    it("serves the latest release from the O(1) cache on a repeat call", async function () {
+        provider.setReleases([
+            createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"),
+            createGitHubRelease("v1.1.0", "2024-02-01T00:00:00Z")
+        ]);
+
+        const first = await service.getLatestRelease("app1", false);
+        const callsAfterFirst = provider.listCalls;
+        const second = await service.getLatestRelease("app1", false);
+
+        expect(first).toBeDefined();
+        expect(second !== undefined ? second.tag : undefined).toBe("v1.1.0");
+        // The second call must be answered from cache without touching GitHub.
+        expect(provider.listCalls).toBe(callsAfterFirst);
+    });
     it("returns latest release", async function () {
         provider.setReleases([
             createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"),
