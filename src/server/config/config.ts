@@ -25,6 +25,7 @@ export interface ServerConfig {
     rateLimits: {
         max: number;
         timeWindow: number;
+        burst?: number;
     };
     assetCache?: {
         maxCacheableSize: number;
@@ -139,10 +140,15 @@ function readGitHubOverride(obj: Record<string, unknown>): ServerConfig["github"
 function readRateLimitsOverride(obj: Record<string, unknown>): ServerConfig["rateLimits"] {
     const max = "max" in obj ? Number(obj.max) : 100;
     const timeWindow = "timeWindow" in obj ? Number(obj.timeWindow) : 60000;
-    return {
+    const burst = "burst" in obj ? Number(obj.burst) : undefined;
+    const result: ServerConfig["rateLimits"] = {
         max: max,
         timeWindow: timeWindow
     };
+    if (burst !== undefined) {
+        result.burst = burst;
+    }
+    return result;
 }
 
 function loadConfigPath(configPath: string): Partial<ServerConfig> {
