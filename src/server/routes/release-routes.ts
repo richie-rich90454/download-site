@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { Release } from "../../shared/types.js";
 
 const appParamsSchema = {
     type: "object",
@@ -85,29 +84,20 @@ export async function registerReleaseRoutes(app: FastifyInstance): Promise<void>
             const page = query.page !== undefined ? query.page : 1;
             const perPage = query.per_page !== undefined ? query.per_page : 30;
             const includePrerelease = query.include_prerelease === true;
-            const releases = await services.release.listReleases(appId, {
+            // The service pages through the cache's index rather than handing back the whole
+            // history for the route to slice, so the cost of a request is the page, not the archive.
+            const result = await services.release.listReleasesPage(appId, {
                 page: page,
                 perPage: perPage,
                 includePrerelease: includePrerelease
             });
-            const paginated = paginateReleases(releases, page, perPage);
             reply.send({
                 app: appId,
                 page: page,
                 perPage: perPage,
-                total: releases.length,
-                releases: paginated
+                total: result.total,
+                releases: result.releases
             });
         }
     );
-}
-
-function paginateReleases(releases: Release[], page: number, perPage: number): Release[] {
-    const start = (page - 1) * perPage;
-    const end = start + perPage;
-    const result: Release[] = [];
-    for (let i = start; i < releases.length && i < end; i = i + 1) {
-        result.push(releases[i]);
-    }
-    return result;
 }
