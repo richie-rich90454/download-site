@@ -46,24 +46,28 @@ export class MetricsService {
             registers: [this.registry]
         });
 
+        // Deliberately labelled by app only. A version label on a counter that fires once per
+        // distinct version ever downloaded makes the time-series cardinality unbounded, which is
+        // a slow memory leak on a publicly reachable endpoint. Track per-app totals and get
+        // per-version detail from the audit log instead.
         this.downloadBytesTotal = new prom.Counter({
             name: "download_bytes_total",
             help: "Total downloaded bytes",
-            labelNames: ["app", "version"],
+            labelNames: ["app"],
             registers: [this.registry]
         });
 
         this.proxiedDownloadsTotal = new prom.Counter({
             name: "proxied_downloads_total",
             help: "Total proxied downloads",
-            labelNames: ["app", "version"],
+            labelNames: ["app"],
             registers: [this.registry]
         });
 
         this.proxyBytesSavedTotal = new prom.Counter({
             name: "proxy_bytes_saved_total",
             help: "Total bytes saved by proxying instead of caching",
-            labelNames: ["app", "version"],
+            labelNames: ["app"],
             registers: [this.registry]
         });
 
@@ -97,16 +101,16 @@ export class MetricsService {
     }
 
     recordDownloadBytes(app: string, version: string, bytes: number): void {
-        this.downloadBytesTotal.inc({ app: app, version: version }, bytes);
+        this.downloadBytesTotal.inc({ app: app }, bytes);
     }
 
     recordProxiedDownload(app: string, version: string, size: number): void {
-        this.proxiedDownloadsTotal.inc({ app: app, version: version });
-        this.proxyBytesSavedTotal.inc({ app: app, version: version }, size);
+        this.proxiedDownloadsTotal.inc({ app: app });
+        this.proxyBytesSavedTotal.inc({ app: app }, size);
     }
 
     recordProxyBytesSaved(app: string, version: string, size: number): void {
-        this.proxyBytesSavedTotal.inc({ app: app, version: version }, size);
+        this.proxyBytesSavedTotal.inc({ app: app }, size);
     }
 
     recordGitHubApiCall(method: string, status: number): void {
