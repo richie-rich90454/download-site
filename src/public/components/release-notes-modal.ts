@@ -1,53 +1,4 @@
 import type { PublicRelease } from "../api-client.js";
-import * as markedNs from "marked";
-import * as DOMPurifyNs from "dompurify";
-import hljs from "highlight.js/lib/core";
-import bash from "highlight.js/lib/languages/bash";
-import css from "highlight.js/lib/languages/css";
-import diff from "highlight.js/lib/languages/diff";
-import ini from "highlight.js/lib/languages/ini";
-import javascript from "highlight.js/lib/languages/javascript";
-import json from "highlight.js/lib/languages/json";
-import markdown from "highlight.js/lib/languages/markdown";
-import plaintext from "highlight.js/lib/languages/plaintext";
-import powershell from "highlight.js/lib/languages/powershell";
-import python from "highlight.js/lib/languages/python";
-import rust from "highlight.js/lib/languages/rust";
-import shell from "highlight.js/lib/languages/shell";
-import typescript from "highlight.js/lib/languages/typescript";
-import xml from "highlight.js/lib/languages/xml";
-
-const marked = markedNs.marked;
-
-/**
- * Only the languages a release note realistically contains.
- *
- * Importing the `highlight.js` barrel pulls in every bundled grammar - around 190 of them, and
- * roughly 1 MB of JavaScript on the critical path for a page whose real content is a version
- * number and a list of file names. That is a bad trade for anyone on a slow connection, so the
- * core is used and grammars are registered explicitly.
- *
- * `plaintext` is registered as the fallback: an unregistered language degrades to unhighlighted
- * text rather than throwing, so a note in an unexpected language still renders safely.
- */
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("diff", diff);
-hljs.registerLanguage("ini", ini);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("markdown", markdown);
-hljs.registerLanguage("plaintext", plaintext);
-hljs.registerLanguage("powershell", powershell);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("shell", shell);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("xml", xml);
-
-function createPurify() {
-    return DOMPurifyNs.default(window);
-}
 
 export interface ReleaseNotesModal {
     element: HTMLElement;
@@ -55,6 +6,14 @@ export interface ReleaseNotesModal {
     close(): void;
 }
 
+/**
+ * The release-notes dialog.
+ *
+ * Rendering lives in a separate module that is imported on demand. The notes are in a modal most
+ * visitors never open, and the renderer - marked, DOMPurify and a dozen highlight.js grammars - is
+ * most of the page's JavaScript. Importing it here would make every visitor pay for text they never
+ * asked to see, and would put it on the critical path of the first paint.
+ */
 export function createReleaseNotesModal(): ReleaseNotesModal {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -80,7 +39,6 @@ export function createReleaseNotesModal(): ReleaseNotesModal {
     closeButton.type = "button";
     closeButton.className = "modal-close";
     closeButton.setAttribute("aria-label", "Close release notes");
-    closeButton.textContent = "\u00D7";
     closeButton.addEventListener("click", function onCloseClick(): void {
         modal.close();
     });
@@ -94,42 +52,40 @@ export function createReleaseNotesModal(): ReleaseNotesModal {
 
     document.body.appendChild(backdrop);
 
+    // Held across calls so a second open before the first finishes reuses the request instead of
+    // starting another one for a module that is a hundred kilobytes of JavaScript.
+    let renderer: Promise<typeof import("./notes-renderer.js")> | null = null;
+
+    async function loadRenderer(): Promise<typeof import("./notes-renderer.js")> {
+        if (renderer === null) {
+            renderer = import("./notes-renderer.js");
+        }
+        return renderer;
+    }
+
     async function open(release: PublicRelease): Promise<void> {
         title.textContent = release.name + " (" + release.tag + ")";
-        const notes = release.notes !== undefined && release.notes !== null ? release.notes : "";
-        const html = await marked.parse(notes);
-        const purify = createPurify();
-        const clean = purify.sanitize(html, {
-            ADD_TAGS: [
-                "h1",
-                "h2",
-                "h3",
-                "h4",
-                "h5",
-                "h6",
-                "p",
-                "br",
-                "hr",
-                "ul",
-                "ol",
-                "li",
-                "code",
-                "pre",
-                "strong",
-                "em",
-                "a",
-                "blockquote"
-            ],
-            ADD_ATTR: ["href", "title", "target", "class"]
-        });
-        body.innerHTML = clean;
-        const codeBlocks = body.querySelectorAll('pre code, code[class^="language-"]');
-        for (let i = 0; i < codeBlocks.length; i = i + 1) {
-            hljs.highlightElement(codeBlocks[i] as HTMLElement);
-        }
+        // The dialog appears before the await, so opening it is instant even on a slow connection
+        // and the body says what is happening rather than sitting empty.
         backdrop.style.display = "flex";
-        backdrop.focus();
         document.body.classList.add("modal-open");
+        body.textContent = "Loading release notes...";
+        backdrop.focus();
+
+        const notes = release.notes !== undefined && release.notes !== null ? release.notes : "";
+        try {
+            const module = await loadRenderer();
+            body.innerHTML = module.renderReleaseNotes(notes);
+            module.highlightCodeBlocks(body);
+        } catch {
+            // A failed lazy import must not leave a dialog with nothing in it and no explanation.
+            // The notes are plain text underneath, so they are shown as text rather than lost - and
+            // as text they cannot execute anything, which is what the sanitiser was there to stop.
+            body.textContent = "";
+            const pre = document.createElement("pre");
+            pre.textContent = notes;
+            body.appendChild(pre);
+        }
     }
 
     function close(): void {
