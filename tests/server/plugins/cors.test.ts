@@ -13,6 +13,9 @@ describe("registerCors", function () {
             corsOrigin: "https://example.com",
             github: { token: undefined, appId: undefined, privateKey: undefined },
             rateLimits: { max: 100, timeWindow: 60000 },
+            adminApiKey: undefined,
+            webhookSecret: undefined,
+            publicBaseUrl: "http://localhost:3000",
             apps: []
         };
 
@@ -40,6 +43,9 @@ describe("registerCors", function () {
             corsOrigin: undefined,
             github: { token: undefined, appId: undefined, privateKey: undefined },
             rateLimits: { max: 100, timeWindow: 60000 },
+            adminApiKey: undefined,
+            webhookSecret: undefined,
+            publicBaseUrl: "http://localhost:3000",
             apps: []
         };
 
