@@ -11,6 +11,10 @@ export default defineConfig({
         emptyOutDir: true,
         sourcemap: sourcemap,
         minify: true,
+        // ES6 is the floor for the shipped bundle, matching the browser tsconfig's target. Vite
+        // defaults to a much newer target, which quietly lets syntax that older Safari and older
+        // Android WebView cannot parse reach production.
+        target: "es6",
         rollupOptions: {
             output: {
                 entryFileNames: "assets/[name]-[hash].js",
