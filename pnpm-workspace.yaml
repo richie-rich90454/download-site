@@ -1,0 +1,14 @@
+# pnpm 12 reads project settings from this file rather than from the `pnpm` field in package.json,
+# which is now ignored. Kept as a workspace file so a future package can be added here without
+# changing how the root project is configured.
+#
+# allowBuilds is pnpm's build-script allowlist. Each entry is a native addon that compiles or
+# downloads a binary during install, and a skipped build shows up as a module that imports cleanly
+# and then throws on first use - the worst possible moment to discover it.
+allowBuilds:
+    # The release and asset caches are both better-sqlite3.
+    better-sqlite3: true
+    # msgpackr uses this to accelerate serialising release records.
+    msgpackr-extract: true
+    # esbuild ships a platform binary; without its postinstall the bundler cannot start.
+    esbuild: true
