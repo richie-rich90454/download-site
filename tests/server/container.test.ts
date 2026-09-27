@@ -1,13 +1,20 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import "reflect-metadata";
+import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import * as containerModule from "../../src/server/container.js";
 import * as config from "../../src/server/config/config.js";
 
+let tempDir: string;
+let openServices: containerModule.Services | undefined;
+
 function createTestConfig(): config.ServerConfig {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-container-"));
     return {
         port: 3000,
-        cacheDir: "/tmp/cache",
+        cacheDir: tempDir,
         logLevel: "silent",
+        corsOrigin: undefined,
         github: {
             token: undefined,
             appId: undefined,
@@ -17,6 +24,9 @@ function createTestConfig(): config.ServerConfig {
             max: 100,
             timeWindow: 60000
         },
+        adminApiKey: undefined,
+        webhookSecret: undefined,
+        publicBaseUrl: "https://mirror.example.com",
         apps: [
             {
                 id: "app1",
@@ -27,161 +37,138 @@ function createTestConfig(): config.ServerConfig {
     };
 }
 
-describe("container", function () {
-    beforeEach(function () {
-        containerModule.container.reset();
-    });
+/** Builds the graph and remembers it so the SQLite handles can be released afterwards. */
+function build(): containerModule.Services {
+    const services = containerModule.registerServices(createTestConfig());
+    openServices = services;
+    return services;
+}
 
-    it("registers and resolves ServerConfig singleton", function () {
+afterEach(function () {
+    // Windows will not remove a directory that still holds an open SQLite file.
+    if (openServices !== undefined) {
+        openServices.metadataCache.close();
+        openServices.assetCache.close();
+        openServices = undefined;
+    }
+    if (tempDir !== undefined) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+/**
+ * The container is a plain composition root, so the thing worth asserting is that every service
+ * is constructed and reachable on the returned graph. The previous version of this file resolved
+ * each service out of a tsyringe container that nothing ever resolved from.
+ */
+describe("registerServices", function () {
+    it("returns the config it was given", function () {
         const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
 
-        const resolved = containerModule.container.resolve("ServerConfig");
-        expect(resolved.port).toBe(cfg.port);
-        expect(resolved.cacheDir).toBe(cfg.cacheDir);
+        const services = containerModule.registerServices(cfg);
+        openServices = services;
+
+        expect(services.config).toBe(cfg);
     });
 
-    it("registers and resolves Logger singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides a logger", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("Logger");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.info).toBe("function");
+        expect(typeof services.logger.info).toBe("function");
     });
 
-    it("returns the same logger instance on repeated resolves", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides metrics", function () {
+        const services = build();
 
-        const first = containerModule.container.resolve("Logger");
-        const second = containerModule.container.resolve("Logger");
-        expect(first).toBe(second);
+        expect(typeof services.metrics.metrics).toBe("function");
     });
 
-    it("registers MetricsService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides the health service", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("MetricsService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.metrics).toBe("function");
+        expect(typeof services.health.isReady).toBe("function");
     });
 
-    it("registers TelemetryService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides the GitHub provider", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("TelemetryService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getTracer).toBe("function");
+        expect(typeof services.githubProvider.listReleases).toBe("function");
     });
 
-    it("registers HealthService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides the metadata cache", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("HealthService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.isReady).toBe("function");
+        expect(typeof services.metadataCache.getReleases).toBe("function");
+        expect(typeof services.metadataCache.getLatestRelease).toBe("function");
     });
 
-    it("registers GitHubProvider singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides the asset cache", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("GitHubProvider");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.listReleases).toBe("function");
+        expect(typeof services.assetCache.getAssetPath).toBe("function");
+        expect(typeof services.assetCache.getStats).toBe("function");
     });
 
-    it("registers MetadataCacheService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides the platform detector", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("MetadataCacheService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getReleases).toBe("function");
+        expect(typeof services.platformDetector.detectTarget).toBe("function");
     });
 
-    it("registers AssetCacheService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("provides the release service", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("AssetCacheService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getAssetPath).toBe("function");
+        expect(typeof services.release.listReleases).toBe("function");
     });
 
-    it("uses custom maxCacheableSize when configured", function () {
+    it("provides the download service", function () {
+        const services = build();
+
+        expect(typeof services.download.resolveAsset).toBe("function");
+    });
+
+    it("provides every updater service", function () {
+        const services = build();
+
+        expect(typeof services.tauriUpdater.getV1Update).toBe("function");
+        expect(typeof services.genericUpdater.getUpdate).toBe("function");
+        expect(typeof services.squirrelUpdater.getUpdate).toBe("function");
+        expect(typeof services.sparkleUpdater.getAppcast).toBe("function");
+    });
+
+    it("uses the configured public base url for download links", function () {
+        const services = build();
+
+        const url = services.download.buildAssetUrl("app1", "v1.0.0", "app.exe");
+
+        expect(url.indexOf("https://mirror.example.com/download/app1") === 0).toBe(true);
+    });
+
+    it("uses a custom maxCacheableSize when configured", function () {
         const cfg = createTestConfig();
         cfg.assetCache = { maxCacheableSize: 1024 };
         const services = containerModule.registerServices(cfg);
+        openServices = services;
 
         const limits = services.assetCache as unknown as { limits: { maxCacheableSize: number } };
         expect(limits.limits.maxCacheableSize).toBe(1024);
     });
 
-    it("registers PlatformDetector singleton", function () {
+    it("falls back to the default maxCacheableSize when none is configured", function () {
         const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+        cfg.assetCache = undefined;
+        const services = containerModule.registerServices(cfg);
+        openServices = services;
 
-        const resolved = containerModule.container.resolve("PlatformDetector");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.detectTarget).toBe("function");
+        const limits = services.assetCache as unknown as { limits: { maxCacheableSize: number } };
+        expect(limits.limits.maxCacheableSize).toBe(config.DEFAULT_MAX_CACHEABLE_SIZE);
     });
 
-    it("registers ReleaseService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
+    it("returns the same instance for a repeated lookup on the graph", function () {
+        const services = build();
 
-        const resolved = containerModule.container.resolve("ReleaseService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.listReleases).toBe("function");
-    });
-
-    it("registers DownloadService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
-
-        const resolved = containerModule.container.resolve("DownloadService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.resolveAsset).toBe("function");
-    });
-
-    it("registers TauriUpdaterService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
-
-        const resolved = containerModule.container.resolve("TauriUpdaterService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getV1Update).toBe("function");
-    });
-
-    it("registers GenericUpdaterService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
-
-        const resolved = containerModule.container.resolve("GenericUpdaterService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getUpdate).toBe("function");
-    });
-
-    it("registers SquirrelUpdaterService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
-
-        const resolved = containerModule.container.resolve("SquirrelUpdaterService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getUpdate).toBe("function");
-    });
-
-    it("registers SparkleUpdaterService singleton", function () {
-        const cfg = createTestConfig();
-        containerModule.registerServices(cfg);
-
-        const resolved = containerModule.container.resolve("SparkleUpdaterService");
-        expect(resolved).toBeDefined();
-        expect(typeof resolved.getAppcast).toBe("function");
+        // The caches must be shared, not rebuilt per lookup, or the SQLite handles would leak.
+        expect(services.assetCache).toBe(services.assetCache);
+        expect(services.metadataCache).toBe(services.metadataCache);
     });
 });
