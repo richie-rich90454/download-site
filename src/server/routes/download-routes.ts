@@ -24,6 +24,20 @@ interface DownloadQuery {
     platform?: string;
 }
 
+/**
+ * A repeated request header arrives as an array. Taking the first is what the client meant; the
+ * duplicates exist because a proxy appended one.
+ */
+function headerValue(value: string | string[] | undefined): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (Array.isArray(value)) {
+        return value[0];
+    }
+    return value;
+}
+
 export async function registerDownloadRoutes(app: FastifyInstance): Promise<void> {
     app.get(
         "/download/:app",
@@ -42,14 +56,16 @@ export async function registerDownloadRoutes(app: FastifyInstance): Promise<void
             const query = request.query as DownloadQuery;
             const userAgent = request.headers["user-agent"];
             const rangeHeader = request.headers.range;
+            const ifNoneMatch = headerValue(request.headers["if-none-match"]);
+            const ifModifiedSince = headerValue(request.headers["if-modified-since"]);
             try {
                 const result = await services.download.resolveAsset(appId, {
                     version: query.version,
                     assetName: query.asset,
-                    userAgent: Array.isArray(userAgent) ? userAgent[0] : userAgent,
+                    userAgent: userAgent !== undefined ? userAgent[0] : undefined,
                     platformHint: query.platform
                 });
-                const range = Array.isArray(rangeHeader) ? rangeHeader[0] : rangeHeader;
+                const range = headerValue(rangeHeader);
                 if (result.proxied) {
                     await services.download.proxyDownload(
                         appId,
@@ -65,7 +81,9 @@ export async function registerDownloadRoutes(app: FastifyInstance): Promise<void
                         result.asset.name,
                         reply,
                         range,
-                        result.asset.checksum
+                        result.asset.checksum,
+                        ifNoneMatch,
+                        ifModifiedSince
                     );
                 } else {
                     throw new Error("Resolved asset has no file path and is not proxied");
