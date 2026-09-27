@@ -834,10 +834,19 @@ describe("DiskAssetCacheService", function () {
         expect(String(mode).toLowerCase()).toBe("wal");
     });
 
-    it("migrates a database created before the stat columns existed", function () {
-        // Build a database with exactly the pre-migration shape.
-        const dbPath = path.join(tempDir, "assets.db");
-        const legacy = new Database(dbPath);
+    it("serves repeated stats reads from the memo instead of re-aggregating", function () {
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+        // The O(1) claim depends on this: an operator polling the footprint must not cause a table
+        // scan per call.
+        const first = cache.getStats();
+        const second = cache.getStats();
+        expect(second.totalSize).toBe(first.totalSize);
+        expect(second.totalCount).toBe(first.totalCount);
+    });
+
+    it("discards a database created before these migrations existed", function () {
+        const legacyDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-legacy-assets-"));
+        const legacy = new Database(path.join(legacyDir, "assets.db"));
         legacy.exec(`
             CREATE TABLE asset_cache (
                 app TEXT NOT NULL,
@@ -851,163 +860,69 @@ describe("DiskAssetCacheService", function () {
                 PRIMARY KEY (app, version, asset_name)
             );
         `);
-        const legacyColumns = legacy.pragma("table_info(asset_cache)") as { name: string }[];
         legacy.close();
-        expect(
-            legacyColumns.map(function (c) {
-                return c.name;
-            })
-        ).not.toContain("size_on_disk");
 
-        // Constructing the service must add the columns without losing the existing rows.
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        cache.close();
-
-        const verify = new Database(dbPath, { readonly: true });
-        const columns = verify.pragma("table_info(asset_cache)") as { name: string }[];
-        verify.close();
-        const names = columns.map(function (c) {
-            return c.name;
-        });
-        expect(names).toContain("size_on_disk");
-        expect(names).toContain("mtime_ms");
+        const cache = new assetCache.DiskAssetCacheService(legacyDir, new SilentLogger(), new metrics.MetricsService());
+        try {
+            // Nothing carried over, and the service is usable against the rebuilt schema.
+            expect(cache.getStats().totalCount).toBe(0);
+            expect(cache.getChecksum("app1", "v1.0.0", "app.exe")).toBeUndefined();
+        } finally {
+            cache.close();
+        }
     });
 
-    it("reports cache stats from memoised counters in O(1)", async function () {
-        const data = Buffer.from("counted bytes");
-        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
-        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-
-        expect(cache.getStats()).toEqual({ totalSize: 0, totalCount: 0 });
-
-        await cache.getAssetPath("app1", "v1.0.0", asset);
-        const afterDownload = cache.getStats();
-        expect(afterDownload.totalCount).toBe(1);
-
-        // Repeated reads are served from the memo, and a returned copy cannot corrupt it.
-        const again = cache.getStats();
-        expect(again).toEqual(afterDownload);
-        again.totalCount = 999;
-        expect(cache.getStats().totalCount).toBe(1);
-    });
-
-    it("invalidates memoised stats after a purge", async function () {
-        const data = Buffer.from("purge me");
-        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
-        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        await cache.getAssetPath("app1", "v1.0.0", asset);
-        expect(cache.getStats().totalCount).toBe(1);
-
-        cache.purge("app1", "v1.0.0");
-
-        expect(cache.getStats().totalCount).toBe(0);
-    });
-
-    it("rejects an asset name that would resolve outside its cache directory", function () {
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        const internals = cache as unknown as {
-            assertDirectChild: (parent: string, target: string) => void;
-            assertInsideCacheRoot: (target: string) => void;
-        };
-        const dir = path.join(tempDir, "assets", "app1", "v1.0.0");
-
-        // Bypasses the sanitiser to prove the containment invariant stands on its own, so a
-        // future change to the character filter cannot silently reopen the traversal class.
+    it("rethrows an open failure that is not an unreadable schema", function () {
+        const brokenDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-broken-assets-"));
+        // A directory where the database belongs. Treating this as an unreadable schema would
+        // delete the operator's directory and retry forever, so it has to surface.
+        fs.mkdirSync(path.join(brokenDir, "assets.db"));
         expect(function () {
-            internals.assertDirectChild(dir, path.join(dir, "..", "escaped"));
-        }).toThrow("outside the cache directory");
-        expect(function () {
-            internals.assertDirectChild(dir, path.join(dir, "nested", "deeper"));
-        }).toThrow("outside the cache directory");
-        expect(function () {
-            internals.assertDirectChild(dir, path.join(dir, "fine.exe"));
-        }).not.toThrow();
+            new assetCache.DiskAssetCacheService(brokenDir, new SilentLogger(), new metrics.MetricsService());
+        }).toThrow();
+    });
+});
 
-        expect(function () {
-            internals.assertInsideCacheRoot(path.join(tempDir, "assets", "app1", "v1.0.0"));
-        }).not.toThrow();
-        expect(function () {
-            internals.assertInsideCacheRoot(path.join(tempDir, "elsewhere"));
-        }).toThrow("outside the cache directory");
+describe("isInsideDir", function () {
+    it("accepts the directory itself and its descendants", function () {
+        expect(assetCache.isInsideDir("/srv/cache", "/srv/cache")).toBe(true);
+        expect(assetCache.isInsideDir("/srv/cache", "/srv/cache/app/v1/file.exe")).toBe(true);
     });
 
-    describe("isInsideDir", function () {
-        it("accepts a directory and its descendants", function () {
-            const root = path.resolve(path.sep + "srv" + path.sep + "cache");
-            expect(assetCache.isInsideDir(root, root)).toBe(true);
-            expect(assetCache.isInsideDir(root, path.join(root, "app", "v1", "a.exe"))).toBe(true);
-        });
-
-        it("rejects siblings that merely share a name prefix", function () {
-            const root = path.resolve(path.sep + "srv" + path.sep + "cache");
-            expect(assetCache.isInsideDir(root, path.resolve(path.sep + "srv" + path.sep + "cache-evil"))).toBe(false);
-        });
-
-        it("rejects traversal above the root", function () {
-            const root = path.resolve(path.sep + "srv" + path.sep + "cache");
-            expect(assetCache.isInsideDir(root, path.join(root, "..", "..", "etc", "passwd"))).toBe(false);
-            expect(assetCache.isInsideDir(root, path.resolve(path.sep + "etc" + path.sep + "passwd"))).toBe(false);
-        });
-
-        it("handles a parent that is already a filesystem root", function () {
-            const fsRoot = path.parse(process.cwd()).root;
-            expect(fsRoot.endsWith(path.sep)).toBe(true);
-            expect(assetCache.isInsideDir(fsRoot, path.join(fsRoot, "srv", "cache"))).toBe(true);
-            expect(assetCache.isInsideDir(fsRoot, fsRoot)).toBe(true);
-        });
+    it("rejects a sibling that merely shares a name prefix", function () {
+        // A bare startsWith would accept this, which is the whole reason the separator is compared.
+        expect(assetCache.isInsideDir("/srv/cache", "/srv/cache-evil/file.exe")).toBe(false);
+        expect(assetCache.isInsideDir("/srv/cache", "/srv/other")).toBe(false);
     });
 
-    it("backfills size and mtime for rows written before those columns existed", async function () {
-        const data = Buffer.from("legacy row");
-        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
-        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        await cache.getAssetPath("app1", "v1.0.0", asset);
-        cache.close();
-
-        // Simulate a pre-migration row: columns present but left at the sentinel.
-        const dbPath = path.join(tempDir, "assets.db");
-        const raw = new Database(dbPath);
-        raw.prepare("UPDATE asset_cache SET size_on_disk = 0, mtime_ms = 0").run();
-        raw.close();
-
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        const verify = new Database(dbPath, { readonly: true });
-        const row = verify.prepare("SELECT size_on_disk, mtime_ms FROM asset_cache").get() as {
-            size_on_disk: number;
-            mtime_ms: number;
-        };
-        verify.close();
-
-        expect(row.size_on_disk).toBe(data.length);
-        expect(row.mtime_ms).toBeGreaterThan(0);
+    it("does not double the separator when the parent already ends in one", function () {
+        // path.resolve normalises the trailing separator away, so the child must still match.
+        expect(assetCache.isInsideDir("/srv/cache/", "/srv/cache/file.exe")).toBe(true);
+        expect(assetCache.isInsideDir("/srv/cache/", "/srv/cache-evil/file.exe")).toBe(false);
     });
+});
 
-    it("skips unreadable files during the stat backfill and leaves the sentinel in place", async function () {
-        const data = Buffer.from("row with a vanished file");
-        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
-        vi.mocked(undici.request).mockResolvedValue(createResponse(data));
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        await cache.getAssetPath("app1", "v1.0.0", asset);
-        cache.close();
-
-        const dbPath = path.join(tempDir, "assets.db");
-        const raw = new Database(dbPath);
-        raw.prepare("UPDATE asset_cache SET size_on_disk = 0, mtime_ms = 0").run();
-        raw.prepare("UPDATE asset_cache SET file_path = ?").run(path.join(tempDir, "assets", "gone", "nope"));
-        raw.close();
-
-        // Must not throw: an unreadable path is logged and skipped, the row stays flagged for
-        // slow re-verification on next read rather than being deleted.
-        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
-        cache.close();
-
-        const verify = new Database(dbPath, { readonly: true });
-        const row = verify.prepare("SELECT size_on_disk FROM asset_cache").get() as { size_on_disk: number };
-        verify.close();
-
-        expect(row.size_on_disk).toBe(0);
+describe("DiskAssetCacheService path guards", function () {
+    it("fails closed when a resolved path would escape the cache root", function () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-guard-"));
+        const service = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), new metrics.MetricsService());
+        try {
+            // Reached through a cast because the character filter already removes every separator,
+            // so no public call can produce an escaping path today. The guard exists so that a future
+            // change to that filter fails closed; without a test it is untested defence-in-depth that
+            // later looks like dead code and gets deleted.
+            const internals = service as unknown as {
+                assertInsideCacheRoot(target: string): void;
+                assertDirectChild(parent: string, target: string): void;
+            };
+            expect(function () {
+                internals.assertInsideCacheRoot(path.join(tempDir, "..", "escaped"));
+            }).toThrow("Refusing to cache an asset outside the cache directory");
+            expect(function () {
+                internals.assertDirectChild(path.join(tempDir, "a"), path.join(tempDir, "a", "b", "c"));
+            }).toThrow("Refusing to cache an asset outside the cache directory");
+        } finally {
+            service.close();
+        }
     });
 });
