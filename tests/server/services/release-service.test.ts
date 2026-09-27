@@ -117,9 +117,16 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
     private returnUndefinedRelease = false;
     /** Counts upstream list calls so a test can prove a read was served from cache. */
     listCalls = 0;
+    /** Counts upstream tag calls, to prove an unknown tag costs nothing. */
+    tagCalls = 0;
 
     setReleases(releases: types.GitHubRelease[]): void {
         this.releases = releases;
+    }
+
+    /** Sets the release a single tag lookup resolves to, for the cold-start path. */
+    setTagRelease(release: types.GitHubRelease): void {
+        this.releases = [release];
     }
 
     setListFromCache(fromCache: boolean): void {
@@ -176,6 +183,7 @@ class MockGitHubProvider implements githubTypes.GitHubProvider {
     }
 
     async getReleaseByTag(repo: string, tag: string): Promise<githubTypes.FetchResult<types.GitHubRelease>> {
+        this.tagCalls += 1;
         if (this.throwOnTag) {
             throw new Error("tag error");
         }
@@ -288,6 +296,83 @@ describe("ReleaseService", function () {
         expect(second !== undefined ? second.tag : undefined).toBe("v1.1.0");
         // The second call must be answered from cache without touching GitHub.
         expect(provider.listCalls).toBe(callsAfterFirst);
+    });
+    describe("unknown tag refusal", function () {
+        it("does not call GitHub for a tag absent from a known release list", async function () {
+            provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+            await service.listReleases("app1", {});
+            const callsBefore = provider.listCalls;
+            const tagCallsBefore = provider.tagCalls;
+
+            const result = await service.getReleaseByTag("app1", "v9.9.9-not-real");
+
+            expect(result).toBeUndefined();
+            // The point of the fix: an unknown tag costs zero upstream requests, so a client
+            // cannot walk the tag space to exhaust the hourly GitHub quota.
+            expect(provider.listCalls).toBe(callsBefore);
+            expect(provider.tagCalls).toBe(tagCallsBefore);
+        });
+
+        it("still serves a tag that is in the cached list", async function () {
+            provider.setReleases([
+                createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"),
+                createGitHubRelease("v1.1.0", "2024-02-01T00:00:00Z")
+            ]);
+            await service.listReleases("app1", {});
+
+            const result = await service.getReleaseByTag("app1", "v1.1.0");
+
+            expect(result).toBeDefined();
+            expect(result.tag).toBe("v1.1.0");
+        });
+
+        it("finds a known tag beyond the first page window", async function () {
+            const many: types.GitHubRelease[] = [];
+            for (let i = 0; i < 400; i = i + 1) {
+                many.push(createGitHubRelease("v0." + String(i) + ".0", "2024-01-01T00:00:00Z"));
+            }
+            provider.setReleases(many);
+            await service.listReleases("app1", {});
+
+            const result = await service.getReleaseByTag("app1", "v0.399.0");
+
+            expect(result !== undefined ? result.tag : undefined).toBe("v0.399.0");
+        });
+
+        it("walks past the last full page when scanning for a tag", async function () {
+            const many: types.GitHubRelease[] = [];
+            for (let i = 0; i < 400; i = i + 1) {
+                many.push(createGitHubRelease("v0." + String(i) + ".0", "2024-01-01T00:00:00Z"));
+            }
+            provider.setReleases(many);
+            await service.listReleases("app1", {});
+            const tagCallsBefore = provider.tagCalls;
+
+            // Exactly two full pages, so the scan reaches a third, empty one.
+            const result = await service.getReleaseByTag("app1", "v9-absent");
+
+            expect(result).toBeUndefined();
+            expect(provider.tagCalls).toBe(tagCallsBefore);
+        });
+        it("allows the fetch when nothing is cached, as on a cold start", async function () {
+            provider.setTagRelease(createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z"));
+            const tagCallsBefore = provider.tagCalls;
+
+            const result = await service.getReleaseByTag("app1", "v1.0.0");
+
+            expect(result).toBeDefined();
+            expect(provider.tagCalls).toBe(tagCallsBefore + 1);
+        });
+
+        it("allows the explicit admin refresh path to bypass the check", async function () {
+            provider.setReleases([createGitHubRelease("v1.0.0", "2024-01-01T00:00:00Z")]);
+            await service.listReleases("app1", {});
+            provider.setTagRelease(createGitHubRelease("v7.7.7", "2024-09-01T00:00:00Z"));
+
+            const result = await service.refreshReleaseByTag("app1", "v7.7.7");
+
+            expect(result !== undefined ? result.tag : undefined).toBe("v7.7.7");
+        });
     });
     it("returns latest release", async function () {
         provider.setReleases([
