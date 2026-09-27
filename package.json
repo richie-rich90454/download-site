@@ -5,10 +5,12 @@
     "main": "dist/server/main.js",
     "type": "module",
     "engines": {
-        "node": ">=22.12.0"
+        "node": ">=22.12.0",
+        "pnpm": ">=12.0.0"
     },
+    "packageManager": "pnpm@12.4.1",
     "scripts": {
-        "build": "npm run build:server && npm run build:public",
+        "build": "pnpm run build:server && pnpm run build:public",
         "build:server": "tsc -b",
         "build:public": "vite build",
         "check:bundle": "node scripts/check-bundle-budget.mjs",
@@ -17,7 +19,7 @@
         "typecheck": "tsc -b",
         "dev:public": "vite",
         "start": "node dist/server/main.js",
-        "prod": "npm run build && npm run start",
+        "prod": "pnpm run build && pnpm run start",
         "test": "vitest run",
         "lint": "eslint src tests --ext .ts,.tsx,.js,.jsx",
         "lint:fix": "eslint src tests --ext .ts,.tsx,.js,.jsx --fix",
@@ -30,7 +32,7 @@
             "eslint --fix",
             "oxfmt --write"
         ],
-        "*.{ts,tsx}": "node -e \"require('child_process').execSync('npm run typecheck',{stdio:'inherit'})\""
+        "*.{ts,tsx}": "node -e \"require('child_process').execSync('pnpm run typecheck',{stdio:'inherit'})\""
     },
     "keywords": [],
     "author": "",
