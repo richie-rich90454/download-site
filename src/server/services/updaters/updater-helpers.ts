@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as semver from "semver";
 import * as types from "../../../shared/types.js";
 import * as assetCache from "../../cache/asset-cache.js";
 import * as download from "../download-service.js";
@@ -11,11 +12,48 @@ export function normalizeVersion(version: string): string {
     return trimmed;
 }
 
+/**
+ * Coerces a version to a comparable semver, tolerating a leading v and a short form.
+ *
+ * Release tags are not guaranteed to be strict semver: `v1.2` and `1.2.0` both appear in the
+ * wild, and an updater that cannot understand the tag it is handed cannot decide whether a client
+ * is current. Returns undefined when the value cannot be read as a version at all, in which case
+ * callers fall back to an exact string comparison rather than guessing.
+ */
+export function toComparable(version: string): semver.SemVer | undefined {
+    const candidate = normalizeVersion(version);
+    const direct = semver.valid(candidate);
+    if (direct !== null) {
+        return new semver.SemVer(direct);
+    }
+    // A short form such as `1.2` is only comparable once the missing parts are supplied.
+    const coerced = semver.coerce(candidate, { includePrerelease: true });
+    if (coerced === null) {
+        return undefined;
+    }
+    return coerced;
+}
+
+/**
+ * Whether a client is already on the latest version.
+ *
+ * This used to be string equality after stripping the leading v, which meant `1.2`, `1.2.0` and
+ * `v1.2.0` all read as "an update is available" and a client that was fully up to date would be
+ * told to reinstall forever. Real precedence also handles prerelease ordering, so a stable client
+ * is not pushed onto a prerelease of the same version and vice versa.
+ *
+ * Falls back to exact comparison when either side is not a recognisable version.
+ */
 export function isUpToDate(currentVersion: string | undefined, latestVersion: string): boolean {
     if (currentVersion === undefined || currentVersion.length === 0) {
         return false;
     }
-    return normalizeVersion(currentVersion) === normalizeVersion(latestVersion);
+    const current = toComparable(currentVersion);
+    const latest = toComparable(latestVersion);
+    if (current === undefined || latest === undefined) {
+        return normalizeVersion(currentVersion) === normalizeVersion(latestVersion);
+    }
+    return semver.gte(current, latest);
 }
 
 export function findSignatureAsset(assets: types.Asset[], assetName: string): types.Asset | undefined {
