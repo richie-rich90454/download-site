@@ -14,6 +14,7 @@ describe("loadConfig", function () {
     const originalMaxCacheableSize = process.env.MAX_CACHEABLE_SIZE;
     const originalAdminApiKey = process.env.ADMIN_API_KEY;
     const originalWebhookSecret = process.env.WEBHOOK_SECRET;
+    const originalPublicBaseUrl = process.env.PUBLIC_BASE_URL;
 
     beforeEach(function () {
         delete process.env.PORT;
@@ -27,6 +28,7 @@ describe("loadConfig", function () {
         // starts from a known state rather than inheriting a developer's local values.
         delete process.env.ADMIN_API_KEY;
         delete process.env.WEBHOOK_SECRET;
+        delete process.env.PUBLIC_BASE_URL;
     });
 
     afterEach(function () {
@@ -46,6 +48,11 @@ describe("loadConfig", function () {
             delete process.env.WEBHOOK_SECRET;
         } else {
             process.env.WEBHOOK_SECRET = originalWebhookSecret;
+        }
+        if (originalPublicBaseUrl === undefined) {
+            delete process.env.PUBLIC_BASE_URL;
+        } else {
+            process.env.PUBLIC_BASE_URL = originalPublicBaseUrl;
         }
     });
 
@@ -108,6 +115,66 @@ describe("loadConfig", function () {
         expect(function () {
             config.loadConfig();
         }).toThrow("WEBHOOK_SECRET is set but shorter than 32 characters");
+    });
+
+    it("uses PUBLIC_BASE_URL for absolute updater URLs", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        process.env.PUBLIC_BASE_URL = "https://mirror.example.com";
+
+        const cfg = config.loadConfig();
+
+        expect(cfg.publicBaseUrl).toBe("https://mirror.example.com");
+    });
+
+    it("strips trailing slashes from PUBLIC_BASE_URL", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        process.env.PUBLIC_BASE_URL = "https://mirror.example.com///";
+
+        const cfg = config.loadConfig();
+
+        expect(cfg.publicBaseUrl).toBe("https://mirror.example.com");
+    });
+
+    it("falls back to localhost outside production", function () {
+        process.env.PORT = "4321";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        const originalNodeEnv = process.env.NODE_ENV;
+        delete process.env.NODE_ENV;
+        try {
+            const cfg = config.loadConfig();
+
+            expect(cfg.publicBaseUrl).toBe("http://localhost:4321");
+        } finally {
+            if (originalNodeEnv === undefined) {
+                delete process.env.NODE_ENV;
+            } else {
+                process.env.NODE_ENV = originalNodeEnv;
+            }
+        }
+    });
+
+    it("refuses to start in production without PUBLIC_BASE_URL", function () {
+        process.env.PORT = "3000";
+        process.env.CACHE_DIR = "./cache";
+        process.env.APPS = JSON.stringify([{ id: "app1", repo: "owner/repo", name: "App One" }]);
+        const originalNodeEnv = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
+        try {
+            expect(function () {
+                config.loadConfig();
+            }).toThrow("PUBLIC_BASE_URL is required when NODE_ENV=production");
+        } finally {
+            if (originalNodeEnv === undefined) {
+                delete process.env.NODE_ENV;
+            } else {
+                process.env.NODE_ENV = originalNodeEnv;
+            }
+        }
     });
 
     it("defaults log level to info", function () {
