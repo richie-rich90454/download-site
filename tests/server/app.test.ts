@@ -149,7 +149,9 @@ class MockReleaseService {
     private releases: types.Release[] = [];
     private throwOnList = false;
     private typedError: Error | undefined = undefined;
+    refreshed = false;
     warmCacheCalled = false;
+    tagLookupMisses = false;
 
     setReleases(releases: types.Release[]): void {
         this.releases = releases;
@@ -165,6 +167,10 @@ class MockReleaseService {
 
     async listReleases(): Promise<types.Release[]> {
         return this.listOrThrow();
+    }
+
+    async refreshApp(): Promise<void> {
+        this.refreshed = true;
     }
 
     async listReleasesPage(): Promise<{ releases: types.Release[]; total: number }> {
@@ -190,10 +196,21 @@ class MockReleaseService {
     }
 
     async getReleaseByTag(appId: string, tag: string): Promise<types.Release | undefined> {
+        if (this.tagLookupMisses) {
+            return undefined;
+        }
         for (let i = 0; i < this.releases.length; i = i + 1) {
             if (this.releases[i].tag === tag) {
                 return this.releases[i];
             }
+        }
+        if (this.releases.length > 0) {
+            return undefined;
+        }
+        // No releases configured: answer for the one tag the tests ask about, so a test that only
+        // cares about the response's content type is not turned into a 404 test.
+        if (tag === "v1.0.0") {
+            return createRelease("v1.0.0");
         }
         return undefined;
     }
@@ -886,6 +903,112 @@ vitest.describe("buildApp", function () {
         });
 
         vitest.expect(response.statusCode).toBe(403);
+    });
+
+    vitest.it("prewarms the app a webhook was about", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        const app = await appFactory.buildApp(services);
+        const payload = JSON.stringify({
+            action: "published",
+            repository: { full_name: "owner/app1" },
+            release: { tag_name: "v1.0.0" }
+        });
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const release = services.release as unknown as { refreshed: boolean };
+        // Invalidation alone leaves a window where the first user after a release sees the old data.
+        // For an updater that is the difference between "up to date" and "still on the previous
+        // version", and closing it for everyone beats closing it for whoever asks first.
+        vitest.expect(release.refreshed).toBe(true);
+    });
+
+    vitest.it("does not prewarm an app the webhook is not about", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        const app = await appFactory.buildApp(services);
+        const payload = JSON.stringify({
+            action: "published",
+            repository: { full_name: "someone-else/other" },
+            release: { tag_name: "v1.0.0" }
+        });
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+
+        vitest.expect(response.statusCode).toBe(200);
+        const release = services.release as unknown as { refreshed: boolean };
+        vitest.expect(release.refreshed).toBe(false);
+    });
+
+    vitest.it("serves release notes as markdown for one tag", async function () {
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({ method: "GET", url: "/api/releases/app1/v1.0.0/notes" });
+
+        vitest.expect(response.statusCode).toBe(200);
+        // Markdown source, not HTML: serving HTML here would need a sanitiser running inside the
+        // server process, and a second sanitiser whose rules could drift from the browser's.
+        vitest.expect(response.headers["content-type"]).toContain("text/markdown");
+        vitest.expect(response.payload.length).toBeGreaterThan(0);
+    });
+
+    vitest.it("reports an unknown tag as not found", async function () {
+        (services.release as unknown as { tagLookupMisses: boolean }).tagLookupMisses = true;
+        const app = await appFactory.buildApp(services);
+
+        const response = await app.inject({ method: "GET", url: "/api/releases/app1/v9.9.9/notes" });
+
+        vitest.expect(response.statusCode).toBe(404);
+        vitest.expect(JSON.parse(response.payload).error.code).toBe("NOT_FOUND");
+    });
+
+    vitest.it("still acknowledges a webhook whose prewarm fails", async function () {
+        services.config.webhookSecret = TEST_WEBHOOK_SECRET;
+        (services.release as unknown as { refreshApp: () => Promise<void> }).refreshApp = function () {
+            return Promise.reject(new Error("github unreachable"));
+        };
+        const app = await appFactory.buildApp(services);
+        const payload = JSON.stringify({
+            action: "published",
+            repository: { full_name: "owner/app1" },
+            release: { tag_name: "v1.0.0" }
+        });
+        const signature = "sha256=" + crypto.createHmac("sha256", TEST_WEBHOOK_SECRET).update(payload).digest("hex");
+
+        const response = await app.inject({
+            method: "POST",
+            url: "/webhooks/github/release",
+            headers: {
+                "x-hub-signature-256": signature,
+                "content-type": "application/json"
+            },
+            payload: payload
+        });
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 10);
+        });
+
+        // GitHub redelivers on a non-2xx, and the invalidation has already happened, so failing here
+        // would cost a redelivery storm to buy nothing.
+        vitest.expect(response.statusCode).toBe(200);
     });
 
     vitest.it("accepts valid github webhook", async function () {
