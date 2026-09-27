@@ -136,6 +136,16 @@
     box-sizing: border-box;
 }
 
+html {
+    color-scheme: light dark;
+    /* The field is painted on the root, not the body. On the body it covers exactly one viewport
+       and the page's own background shows through below that - a white band under a dark field. */
+    background:
+        radial-gradient(1200px 700px at 15% 0%, var(--aero-field-b), transparent 70%),
+        radial-gradient(900px 600px at 90% 10%, var(--aero-field-c), transparent 65%), var(--aero-field-a);
+    background-attachment: fixed;
+}
+
 body {
     margin: 0;
     min-height: 100vh;
@@ -147,13 +157,7 @@ body {
     align-items: flex-start;
     justify-content: center;
     padding: 32px 16px 48px;
-
-    /* The Aero field: a soft three-stop wash, no image, so nothing to download. */
-    background:
-        radial-gradient(1200px 700px at 15% 0%, var(--aero-field-b), transparent 70%),
-        radial-gradient(900px 600px at 90% 10%, var(--aero-field-c), transparent 65%),
-        linear-gradient(to bottom, var(--aero-field-a), var(--aero-field-a));
-    background-attachment: fixed;
+    background: transparent;
 }
 
 h1,
@@ -436,6 +440,9 @@ input:focus-visible {
         var(--shadow-raised),
         inset 0 1px 0 rgba(255, 255, 255, 0.9);
     transition: background 100ms ease-out;
+    /* A label that breaks across lines reads as two phrases, and a row of them turns a button
+       group into a wall. The group wraps between buttons instead. */
+    white-space: nowrap;
 }
 
 .btn:hover {
@@ -481,15 +488,34 @@ input:focus-visible {
     gap: 6px;
 }
 
+/* The version picker is the primary control on a card, so it gets its own full-width row rather
+   than being squeezed beside a label. The component builds a wrapper holding the label and the
+   select, so the row is the wrapper and the control is the select inside it. */
 .version-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.version-selector label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    flex: 0 0 auto;
+}
+
+.version-selector select {
     font: inherit;
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 7px 10px;
     border-radius: var(--radius);
     border: 1px solid var(--line-strong);
     background: var(--surface-raised);
     color: var(--text);
     box-shadow: var(--shadow-raised);
-    max-width: 100%;
 }
 
 /* ---------------------------------------------------------------- panels */
@@ -502,6 +528,10 @@ input:focus-visible {
     border-radius: var(--radius);
     background: var(--surface-sunken);
     border: 1px solid var(--line);
+    /* A release with twenty assets would otherwise make one card taller than the whole viewport
+       and push everything else off the page. Capped and scrollable instead. */
+    max-height: 220px;
+    overflow-y: auto;
 }
 
 .meta-item {
