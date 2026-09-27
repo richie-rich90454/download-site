@@ -1,11 +1,13 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import Database from "better-sqlite3";
+import { and, asc, count, eq, sql, type SQL } from "drizzle-orm";
 import * as types from "../../shared/types.js";
 import * as logger from "../logging/logger.js";
 import * as metrics from "../telemetry/metrics.js";
 import * as egress from "../http/egress.js";
+import { openCacheDatabase, type CacheDatabase } from "../db/client.js";
+import { assetCache } from "../db/schema/assets.js";
 
 export interface AssetCacheService {
     getAssetPath(app: string, version: string, asset: types.Asset): Promise<AssetCacheResult>;
@@ -40,30 +42,9 @@ export interface AssetCacheLimits {
     cleanupIntervalMs?: number;
 }
 
-interface AssetCacheRow {
-    app: string;
-    version: string;
-    asset_name: string;
-    file_path: string;
-    size: number;
-    checksum: string;
-    last_accessed_at: number;
-    created_at: number;
-    size_on_disk: number;
-    mtime_ms: number;
-}
-
 export interface AssetCacheStats {
     totalSize: number;
     totalCount: number;
-}
-
-interface FileToDeleteRow {
-    file_path: string;
-}
-
-interface SumRow {
-    total: number;
 }
 
 /**
@@ -79,34 +60,17 @@ export function isInsideDir(parent: string, child: string): boolean {
     if (target === root) {
         return true;
     }
-    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-    return target.startsWith(prefix);
+    // No trailing-separator check: path.resolve normalises one away, so a resolved root never ends
+    // in a separator and the prefix is always exactly root + sep.
+    return target.startsWith(root + path.sep);
 }
 
 export class DiskAssetCacheService implements AssetCacheService {
-    private readonly db: Database.Database;
+    private readonly db: CacheDatabase;
     private readonly cacheDir: string;
     private readonly logger: logger.Logger;
     private readonly metrics: metrics.MetricsService;
     private readonly limits: AssetCacheLimits;
-    private readonly getStmt: Database.Statement<[string, string, string]>;
-    private readonly insertStmt: Database.Statement<
-        [string, string, string, string, number, string, number, number, number, number]
-    >;
-    private readonly updateAccessStmt: Database.Statement<[number, string, string, string]>;
-    private readonly adoptStatStmt: Database.Statement<[number, number, string, string, string]>;
-    private readonly deleteStmt: Database.Statement<[string, string, string]>;
-    private readonly deleteAppStmt: Database.Statement<[string]>;
-    private readonly deleteAppVersionStmt: Database.Statement<[string, string]>;
-    private readonly deleteAppVersionAssetStmt: Database.Statement<[string, string, string]>;
-    private readonly deleteAllStmt: Database.Statement<[]>;
-    private readonly allStmt: Database.Statement<[]>;
-    private readonly selectFilesAppVersionAssetStmt: Database.Statement<[string, string, string]>;
-    private readonly selectFilesAppVersionStmt: Database.Statement<[string, string]>;
-    private readonly selectFilesAppStmt: Database.Statement<[string]>;
-    private readonly selectFilesAllStmt: Database.Statement<[]>;
-    private readonly sumSizeStmt: Database.Statement<[]>;
-    private readonly countStmt: Database.Statement<[]>;
     private readonly cleanupInterval: ReturnType<typeof setInterval> | undefined;
     private readonly inFlight: Map<string, Promise<AssetCacheResult>>;
     private readonly inFlightStats: AssetCacheStats;
@@ -137,41 +101,7 @@ export class DiskAssetCacheService implements AssetCacheService {
         if (!fs.existsSync(this.cacheDir)) {
             fs.mkdirSync(this.cacheDir, { recursive: true });
         }
-        const dbPath = path.join(cacheDir, "assets.db");
-        this.db = new Database(dbPath);
-        this.migrate();
-        this.getStmt = this.db.prepare(
-            "SELECT file_path, size, checksum, last_accessed_at, created_at, size_on_disk, mtime_ms FROM asset_cache WHERE app = ? AND version = ? AND asset_name = ?"
-        );
-        this.insertStmt = this.db.prepare(
-            "INSERT INTO asset_cache (app, version, asset_name, file_path, size, checksum, last_accessed_at, created_at, size_on_disk, mtime_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        );
-        this.updateAccessStmt = this.db.prepare(
-            "UPDATE asset_cache SET last_accessed_at = ? WHERE app = ? AND version = ? AND asset_name = ?"
-        );
-        this.deleteStmt = this.db.prepare("DELETE FROM asset_cache WHERE app = ? AND version = ? AND asset_name = ?");
-        this.adoptStatStmt = this.db.prepare(
-            "UPDATE asset_cache SET size_on_disk = ?, mtime_ms = ? WHERE app = ? AND version = ? AND asset_name = ?"
-        );
-        this.deleteAppStmt = this.db.prepare("DELETE FROM asset_cache WHERE app = ?");
-        this.deleteAppVersionStmt = this.db.prepare("DELETE FROM asset_cache WHERE app = ? AND version = ?");
-        this.deleteAppVersionAssetStmt = this.db.prepare(
-            "DELETE FROM asset_cache WHERE app = ? AND version = ? AND asset_name = ?"
-        );
-        this.deleteAllStmt = this.db.prepare("DELETE FROM asset_cache");
-        this.allStmt = this.db.prepare(
-            "SELECT app, version, asset_name, file_path, size, checksum, last_accessed_at, created_at, size_on_disk, mtime_ms FROM asset_cache ORDER BY last_accessed_at ASC"
-        );
-        this.selectFilesAppVersionAssetStmt = this.db.prepare(
-            "SELECT file_path FROM asset_cache WHERE app = ? AND version = ? AND asset_name = ?"
-        );
-        this.selectFilesAppVersionStmt = this.db.prepare(
-            "SELECT file_path FROM asset_cache WHERE app = ? AND version = ?"
-        );
-        this.selectFilesAppStmt = this.db.prepare("SELECT file_path FROM asset_cache WHERE app = ?");
-        this.selectFilesAllStmt = this.db.prepare("SELECT file_path FROM asset_cache");
-        this.sumSizeStmt = this.db.prepare("SELECT COALESCE(SUM(size), 0) AS total FROM asset_cache");
-        this.countStmt = this.db.prepare("SELECT COUNT(*) AS total FROM asset_cache");
+        this.db = openCacheDatabase({ filePath: path.join(cacheDir, "assets.db") });
         this.inFlight = new Map();
         this.inFlightStats = { totalSize: 0, totalCount: 0 };
         this.statsValid = false;
@@ -206,7 +136,7 @@ export class DiskAssetCacheService implements AssetCacheService {
     }
 
     getChecksum(app: string, version: string, assetName: string): string | undefined {
-        const row = this.getStmt.get(app, version, assetName) as AssetCacheRow | undefined;
+        const row = this.findRow(app, version, assetName);
         if (row === undefined) {
             return undefined;
         }
@@ -223,26 +153,23 @@ export class DiskAssetCacheService implements AssetCacheService {
     }
 
     purge(app?: string, version?: string, assetName?: string): void {
-        // The narrowed locals are queried and deleted in the same branch so the compiler can
-        // prove each statement receives the exact arity it expects. A shared helper taking
-        // optional arguments would erase that and need runtime guards instead.
-        let rows: FileToDeleteRow[];
-        let deleted: number;
+        // Four explicit branches rather than one dynamically built condition. It is more lines,
+        // but each scope is a literal the planner and the reader can see, and a partial triple
+        // cannot accidentally widen into "purge everything".
+        let where: SQL | undefined;
         if (app !== undefined && version !== undefined && assetName !== undefined) {
-            rows = this.selectFilesAppVersionAssetStmt.all(app, version, assetName) as FileToDeleteRow[];
-            deleted = this.deleteAppVersionAssetStmt.run(app, version, assetName).changes;
+            where = and(eq(assetCache.app, app), eq(assetCache.version, version), eq(assetCache.assetName, assetName));
         } else if (app !== undefined && version !== undefined) {
-            rows = this.selectFilesAppVersionStmt.all(app, version) as FileToDeleteRow[];
-            deleted = this.deleteAppVersionStmt.run(app, version).changes;
+            where = and(eq(assetCache.app, app), eq(assetCache.version, version));
         } else if (app !== undefined) {
-            rows = this.selectFilesAppStmt.all(app) as FileToDeleteRow[];
-            deleted = this.deleteAppStmt.run(app).changes;
+            where = eq(assetCache.app, app);
         } else {
-            rows = this.selectFilesAllStmt.all() as FileToDeleteRow[];
-            deleted = this.deleteAllStmt.run().changes;
+            where = undefined;
         }
+        const rows = this.db.select({ filePath: assetCache.filePath }).from(assetCache).where(where).all();
+        const deleted = this.db.delete(assetCache).where(where).run().changes;
         for (let i = 0; i < rows.length; i = i + 1) {
-            this.deleteFile(rows[i].file_path);
+            this.deleteFile(rows[i].filePath);
         }
         this.statsValid = false;
         this.logger.info("Asset cache purged", {
@@ -257,69 +184,16 @@ export class DiskAssetCacheService implements AssetCacheService {
         if (this.cleanupInterval !== undefined) {
             clearInterval(this.cleanupInterval);
         }
-        this.db.close();
+        this.db.$client.close();
     }
 
-    private migrate(): void {
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS asset_cache (
-                app TEXT NOT NULL,
-                version TEXT NOT NULL,
-                asset_name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                checksum TEXT NOT NULL,
-                last_accessed_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                size_on_disk INTEGER NOT NULL DEFAULT 0,
-                mtime_ms INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (app, version, asset_name)
-            );
-            CREATE INDEX IF NOT EXISTS idx_asset_cache_app ON asset_cache(app);
-            CREATE INDEX IF NOT EXISTS idx_asset_cache_access ON asset_cache(last_accessed_at);
-            CREATE INDEX IF NOT EXISTS idx_asset_cache_created ON asset_cache(created_at);
-        `);
-        // Existing caches predate the O(1) hit check, which needs the on-disk size and mtime
-        // to compare instead of re-hashing. Adding the columns is additive, so a live cache
-        // keeps its files and rows; a backfill below seeds them from the filesystem.
-        this.addColumnIfMissing("asset_cache", "size_on_disk", "INTEGER NOT NULL DEFAULT 0");
-        this.addColumnIfMissing("asset_cache", "mtime_ms", "INTEGER NOT NULL DEFAULT 0");
-        // WAL lets the read-heavy release path proceed while a write is in flight. Without it
-        // better-sqlite3 falls back to a rollback journal and every writer blocks every reader.
-        this.db.pragma("journal_mode = WAL");
-        this.db.pragma("busy_timeout = 5000");
-        this.backfillStatColumns();
-    }
-
-    private addColumnIfMissing(table: string, column: string, definition: string): void {
-        const columns = this.db.pragma("table_info(" + table + ")") as { name: string }[];
-        for (let i = 0; i < columns.length; i = i + 1) {
-            if (columns[i].name === column) {
-                return;
-            }
-        }
-        this.db.exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-    }
-
-    /**
-     * Seeds size_on_disk/mtime_ms for rows written before those columns existed. A row left
-     * at the sentinel 0 fails the O(1) equality check on its next read and is re-verified the
-     * slow way exactly once, so this is an optimisation rather than a correctness requirement.
-     */
-    private backfillStatColumns(): void {
-        const rows = this.db
-            .prepare("SELECT file_path FROM asset_cache WHERE size_on_disk = 0")
-            .all() as FileToDeleteRow[];
-        const update = this.db.prepare("UPDATE asset_cache SET size_on_disk = ?, mtime_ms = ? WHERE file_path = ?");
-        for (let i = 0; i < rows.length; i = i + 1) {
-            const filePath = rows[i].file_path;
-            try {
-                const stat = fs.statSync(filePath);
-                update.run(stat.size, Math.trunc(stat.mtimeMs), filePath);
-            } catch {
-                this.logger.warn("Asset cache backfill skipped unreadable file", { path: filePath });
-            }
-        }
+    private findRow(app: string, version: string, assetName: string): typeof assetCache.$inferSelect | undefined {
+        const row = this.db
+            .select()
+            .from(assetCache)
+            .where(and(eq(assetCache.app, app), eq(assetCache.version, version), eq(assetCache.assetName, assetName)))
+            .get();
+        return row;
     }
 
     /**
@@ -333,42 +207,42 @@ export class DiskAssetCacheService implements AssetCacheService {
      * source of truth at download time and in the background scrub.
      */
     private resolveAssetPath(app: string, version: string, asset: types.Asset): Promise<AssetCacheResult> {
-        const cached = this.getStmt.get(app, version, asset.name) as AssetCacheRow | undefined;
+        const cached = this.findRow(app, version, asset.name);
         if (cached === undefined) {
             this.metrics.recordCacheMiss("asset");
             return this.downloadAndCache(app, version, asset);
         }
         const now = Date.now();
-        if (now - cached.created_at > this.limits.maxAgeMs) {
+        if (now - cached.createdAt > this.limits.maxAgeMs) {
             this.logger.info("Asset cache entry expired", { app: app, version: version, asset: asset.name });
-            this.deleteEntry(app, version, asset.name, cached.file_path);
+            this.deleteEntry(app, version, asset.name, cached.filePath);
             this.metrics.recordCacheMiss("asset");
             return this.downloadAndCache(app, version, asset);
         }
-        const stat = this.statOrUndefined(cached.file_path);
+        const stat = this.statOrUndefined(cached.filePath);
         if (stat === undefined) {
             this.logger.warn("Asset cache file missing", { app: app, version: version, asset: asset.name });
-            this.deleteEntry(app, version, asset.name, cached.file_path);
+            this.deleteEntry(app, version, asset.name, cached.filePath);
             this.metrics.recordCacheMiss("asset");
             return this.downloadAndCache(app, version, asset);
         }
-        const sizeMatches = stat.size === cached.size_on_disk;
-        const mtimeMatches = Math.trunc(stat.mtimeMs) === cached.mtime_ms;
+        const sizeMatches = stat.size === cached.sizeOnDisk;
+        const mtimeMatches = Math.trunc(stat.mtimeMs) === cached.mtimeMs;
         if (sizeMatches && mtimeMatches) {
-            this.updateAccessStmt.run(now, app, version, asset.name);
+            this.touch(app, version, asset.name, now);
             this.metrics.recordCacheHit("asset");
             return Promise.resolve({
-                filePath: cached.file_path,
+                filePath: cached.filePath,
                 cached: true,
                 entry: {
                     app: app,
                     version: version,
                     assetName: asset.name,
-                    filePath: cached.file_path,
+                    filePath: cached.filePath,
                     size: cached.size,
                     checksum: cached.checksum,
                     lastAccessedAt: now,
-                    createdAt: cached.created_at
+                    createdAt: cached.createdAt
                 }
             });
         }
@@ -381,47 +255,59 @@ export class DiskAssetCacheService implements AssetCacheService {
         app: string,
         version: string,
         asset: types.Asset,
-        cached: AssetCacheRow,
+        cached: typeof assetCache.$inferSelect,
         sizeOnDisk: number,
         mtimeMs: number
     ): Promise<AssetCacheResult> {
         let checksum: string;
         try {
-            checksum = await this.computeChecksum(cached.file_path);
+            checksum = await this.computeChecksum(cached.filePath);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn("Asset cache file unreadable during verification", {
-                path: cached.file_path,
+                path: cached.filePath,
                 error: message
             });
-            this.deleteEntry(app, version, asset.name, cached.file_path);
+            this.deleteEntry(app, version, asset.name, cached.filePath);
             this.metrics.recordCacheMiss("asset");
             return this.downloadAndCache(app, version, asset);
         }
         if (checksum !== cached.checksum) {
             this.logger.warn("Asset cache checksum mismatch", { app: app, version: version, asset: asset.name });
-            this.deleteEntry(app, version, asset.name, cached.file_path);
+            this.deleteEntry(app, version, asset.name, cached.filePath);
             this.metrics.recordCacheMiss("asset");
             return this.downloadAndCache(app, version, asset);
         }
-        this.adoptStatStmt.run(sizeOnDisk, mtimeMs, app, version, asset.name);
+        this.db
+            .update(assetCache)
+            .set({ sizeOnDisk: sizeOnDisk, mtimeMs: mtimeMs })
+            .where(and(eq(assetCache.app, app), eq(assetCache.version, version), eq(assetCache.assetName, asset.name)))
+            .run();
         const now = Date.now();
-        this.updateAccessStmt.run(now, app, version, asset.name);
+        this.touch(app, version, asset.name, now);
         this.metrics.recordCacheHit("asset");
         return {
-            filePath: cached.file_path,
+            filePath: cached.filePath,
             cached: true,
             entry: {
                 app: app,
                 version: version,
                 assetName: asset.name,
-                filePath: cached.file_path,
+                filePath: cached.filePath,
                 size: cached.size,
                 checksum: cached.checksum,
                 lastAccessedAt: now,
-                createdAt: cached.created_at
+                createdAt: cached.createdAt
             }
         };
+    }
+
+    private touch(app: string, version: string, assetName: string, now: number): void {
+        this.db
+            .update(assetCache)
+            .set({ lastAccessedAt: now })
+            .where(and(eq(assetCache.app, app), eq(assetCache.version, version), eq(assetCache.assetName, assetName)))
+            .run();
     }
 
     private statOrUndefined(filePath: string): fs.Stats | undefined {
@@ -478,18 +364,33 @@ export class DiskAssetCacheService implements AssetCacheService {
             fs.renameSync(tempPath, finalPath);
             const finalStat = fs.statSync(finalPath);
             const now = Date.now();
-            this.insertStmt.run(
-                app,
-                version,
-                asset.name,
-                finalPath,
-                asset.size,
-                checksum,
-                now,
-                now,
-                finalStat.size,
-                Math.trunc(finalStat.mtimeMs)
-            );
+            this.db
+                .insert(assetCache)
+                .values({
+                    app: app,
+                    version: version,
+                    assetName: asset.name,
+                    filePath: finalPath,
+                    size: asset.size,
+                    checksum: checksum,
+                    lastAccessedAt: now,
+                    createdAt: now,
+                    sizeOnDisk: finalStat.size,
+                    mtimeMs: Math.trunc(finalStat.mtimeMs)
+                })
+                .onConflictDoUpdate({
+                    target: [assetCache.app, assetCache.version, assetCache.assetName],
+                    set: {
+                        filePath: finalPath,
+                        size: asset.size,
+                        checksum: checksum,
+                        lastAccessedAt: now,
+                        createdAt: now,
+                        sizeOnDisk: finalStat.size,
+                        mtimeMs: Math.trunc(finalStat.mtimeMs)
+                    }
+                })
+                .run();
             this.statsValid = false;
             this.metrics.recordDownloadBytes(app, version, asset.size);
             this.logger.info("Asset cached", {
@@ -537,12 +438,12 @@ export class DiskAssetCacheService implements AssetCacheService {
         if (stats.totalSize + neededSize <= this.limits.maxSize && stats.totalCount + 1 <= this.limits.maxCount) {
             return Promise.resolve();
         }
-        const rows = this.allStmt.all() as AssetCacheRow[];
+        const rows = this.leastRecentlyUsed();
         let totalSize = stats.totalSize;
         let totalCount = stats.totalCount;
         for (let i = 0; i < rows.length; i = i + 1) {
             const row = rows[i];
-            this.deleteEntry(row.app, row.version, row.asset_name, row.file_path);
+            this.deleteEntry(row.app, row.version, row.assetName, row.filePath);
             totalSize = totalSize - row.size;
             totalCount = totalCount - 1;
             if (totalSize + neededSize <= this.limits.maxSize && totalCount + 1 <= this.limits.maxCount) {
@@ -555,6 +456,10 @@ export class DiskAssetCacheService implements AssetCacheService {
         return Promise.resolve();
     }
 
+    private leastRecentlyUsed(): (typeof assetCache.$inferSelect)[] {
+        return this.db.select().from(assetCache).orderBy(asc(assetCache.lastAccessedAt)).all();
+    }
+
     /**
      * Two aggregate reads instead of materialising every row. Cached in memory and
      * invalidated on write, so the common case costs nothing at all.
@@ -563,22 +468,37 @@ export class DiskAssetCacheService implements AssetCacheService {
         if (this.statsValid) {
             return this.inFlightStats;
         }
-        const sumRow = this.sumSizeStmt.get() as SumRow;
-        const countRow = this.countStmt.get() as SumRow;
-        this.inFlightStats.totalSize = sumRow.total;
-        this.inFlightStats.totalCount = countRow.total;
+        // Read with a loop rather than get(). An aggregate with no GROUP BY always yields one row,
+        // but get() is typed as possibly-undefined, and guarding for that would be a branch that
+        // cannot be reached and therefore cannot be tested. Starting from zero and letting the row
+        // overwrite it gives the same answer for the empty case and needs no unreachable branch.
+        const rows = this.db
+            .select({
+                totalSize: sql<number>`coalesce(sum(${assetCache.size}), 0)`,
+                totalCount: count()
+            })
+            .from(assetCache)
+            .all();
+        let totalSize = 0;
+        let totalCount = 0;
+        for (let i = 0; i < rows.length; i = i + 1) {
+            totalSize = rows[i].totalSize;
+            totalCount = rows[i].totalCount;
+        }
+        this.inFlightStats.totalSize = totalSize;
+        this.inFlightStats.totalCount = totalCount;
         this.statsValid = true;
         return this.inFlightStats;
     }
 
     private runCleanup(): void {
         const cutoff = Date.now() - this.limits.maxAgeMs;
-        const rows = this.allStmt.all() as AssetCacheRow[];
+        const rows = this.leastRecentlyUsed();
         let cleaned = 0;
         for (let i = 0; i < rows.length; i = i + 1) {
             const row = rows[i];
-            if (row.created_at < cutoff) {
-                this.deleteEntry(row.app, row.version, row.asset_name, row.file_path);
+            if (row.createdAt < cutoff) {
+                this.deleteEntry(row.app, row.version, row.assetName, row.filePath);
                 cleaned = cleaned + 1;
             }
         }
@@ -588,7 +508,10 @@ export class DiskAssetCacheService implements AssetCacheService {
     }
 
     private deleteEntry(app: string, version: string, assetName: string, filePath: string): void {
-        this.deleteStmt.run(app, version, assetName);
+        this.db
+            .delete(assetCache)
+            .where(and(eq(assetCache.app, app), eq(assetCache.version, version), eq(assetCache.assetName, assetName)))
+            .run();
         this.deleteFile(filePath);
         this.statsValid = false;
     }
@@ -626,9 +549,9 @@ export class DiskAssetCacheService implements AssetCacheService {
      * The character filter already removes every separator, so a component can never contain
      * `..` as a *traversal segment*. It does allow the bare strings "." and "..", which are
      * legal under the filter but meaningless as filenames, so they are rejected explicitly.
-     * When the filter mutates a name we also append a short digest of the original: the SQL
-     * row is keyed on the raw name while the file lives under the sanitised one, so without
-     * the digest two distinct raw names could collide onto a single path.
+     * When the filter mutates a name we also append a short digest of the original: the row is
+     * keyed on the raw name while the file lives under the sanitised one, so without the digest
+     * two distinct raw names could collide onto a single path.
      */
     private sanitizeName(name: string): string {
         const sanitized = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/_+/g, "_");
