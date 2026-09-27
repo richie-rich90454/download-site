@@ -10,20 +10,24 @@ vi.mock("undici", function () {
 import * as undici from "undici";
 import * as metrics from "../../../src/server/telemetry/metrics.js";
 import * as githubProvider from "../../../src/server/github/github-provider.js";
+import * as githubTypes from "../../../src/server/github/github-types.js";
 import { SilentLogger } from "../test-helpers.js";
 
 function createResponse(
     status: number,
     body: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    rawText?: string
 ): Awaited<ReturnType<typeof undici.request>> {
     const responseHeaders: Record<string, string> = {};
-    const headerKeys = headers !== undefined ? Object.keys(headers) : [];
-    for (let i = 0; i < headerKeys.length; i = i + 1) {
-        const key = headerKeys[i];
-        const value = headers[key];
-        if (value !== undefined) {
-            responseHeaders[key] = value;
+    if (headers !== undefined) {
+        const headerKeys = Object.keys(headers);
+        for (let i = 0; i < headerKeys.length; i = i + 1) {
+            const key = headerKeys[i];
+            const value = headers[key];
+            if (value !== undefined) {
+                responseHeaders[key] = value;
+            }
         }
     }
     return {
@@ -31,7 +35,7 @@ function createResponse(
         headers: responseHeaders,
         body: {
             text: function () {
-                return Promise.resolve(JSON.stringify(body));
+                return Promise.resolve(rawText !== undefined ? rawText : JSON.stringify(body));
             }
         }
     } as unknown as Awaited<ReturnType<typeof undici.request>>;
@@ -326,13 +330,8 @@ describe("GitHubProvider", function () {
     });
 
     it("throws on invalid JSON response", async function () {
-        const response = createResponse(200, {});
-        response.body = {
-            text: function () {
-                return Promise.resolve("not-json");
-            }
-        };
-        vi.mocked(undici.request).mockResolvedValueOnce(response);
+        // A body that is not JSON at all, rather than a valid JSON document of the wrong shape.
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(200, undefined, undefined, "not-json"));
 
         const provider = createProvider(undefined);
 
