@@ -122,5 +122,6 @@ export function buildSmartDownloadUrl(appName: string, version: string): string 
 }
 
 export function buildInstallCommand(appName: string, version: string, assetName: string): string {
-    return "curl -fsSL " + buildDownloadUrl(appName, version, assetName) + " -o " + assetName;
+    // Both quoted: asset names contain spaces, and the URL contains & which the shell splits on.
+    return 'curl -fsSL "' + buildDownloadUrl(appName, version, assetName) + '" -o "' + assetName + '"';
 }
