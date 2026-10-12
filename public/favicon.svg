@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="orb" cx="38%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#bfe9ff"/>
+      <stop offset="28%" stop-color="#5fb3e8"/>
+      <stop offset="58%" stop-color="#1f7fc4"/>
+      <stop offset="82%" stop-color="#0d4f86"/>
+      <stop offset="100%" stop-color="#083a63"/>
+    </radialGradient>
+    <radialGradient id="swirl" cx="50%" cy="50%" r="50%">
+      <stop offset="55%" stop-color="#37c8b4" stop-opacity="0"/>
+      <stop offset="80%" stop-color="#37c8b4" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#0e6f62" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#06283f" stop-opacity="0.6"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d7ecfa"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="29" fill="url(#orb)"/>
+  <circle cx="32" cy="32" r="29" fill="url(#swirl)"/>
+  <ellipse cx="23" cy="18" rx="13" ry="7" fill="#ffffff" opacity="0.55" transform="rotate(-18 23 18)"/>
+  <path d="M28 14h8v14h9L32 44 19 28h9z" fill="url(#arrow)" stroke="#0a3c5c" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="29" fill="none" stroke="url(#rim)" stroke-width="2.5"/>
+  <circle cx="32" cy="32" r="26" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1"/>
+</svg>
