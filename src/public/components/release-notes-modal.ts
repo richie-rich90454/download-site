@@ -17,14 +17,13 @@ export interface ReleaseNotesModal {
 export function createReleaseNotesModal(): ReleaseNotesModal {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
-    backdrop.setAttribute("role", "dialog");
-    backdrop.setAttribute("aria-modal", "true");
-    backdrop.setAttribute("aria-labelledby", "release-notes-title");
-    backdrop.setAttribute("tabindex", "-1");
-    backdrop.style.display = "none";
 
     const dialog = document.createElement("div");
     dialog.className = "modal-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "release-notes-title");
+    dialog.setAttribute("tabindex", "-1");
     backdrop.appendChild(dialog);
 
     const header = document.createElement("div");
@@ -67,10 +66,10 @@ export function createReleaseNotesModal(): ReleaseNotesModal {
         title.textContent = release.name + " (" + release.tag + ")";
         // The dialog appears before the await, so opening it is instant even on a slow connection
         // and the body says what is happening rather than sitting empty.
-        backdrop.style.display = "flex";
+        backdrop.classList.add("is-open");
         document.body.classList.add("modal-open");
         body.textContent = "Loading release notes...";
-        backdrop.focus();
+        dialog.focus();
 
         const notes = release.notes !== undefined && release.notes !== null ? release.notes : "";
         try {
@@ -89,7 +88,7 @@ export function createReleaseNotesModal(): ReleaseNotesModal {
     }
 
     function close(): void {
-        backdrop.style.display = "none";
+        backdrop.classList.remove("is-open");
         document.body.classList.remove("modal-open");
     }
 
@@ -99,8 +98,10 @@ export function createReleaseNotesModal(): ReleaseNotesModal {
         }
     });
 
-    backdrop.addEventListener("keydown", function onKeydown(event: KeyboardEvent): void {
-        if (event.key === "Escape") {
+    // On the document, not the backdrop: focus is inside the dialog once opened, and a key
+    // handler on the backdrop misses Esc whenever focus sits on an element outside it.
+    document.addEventListener("keydown", function onDocumentKeydown(event: KeyboardEvent): void {
+        if (event.key === "Escape" && backdrop.classList.contains("is-open")) {
             modal.close();
         }
     });
