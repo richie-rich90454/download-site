@@ -114,6 +114,38 @@ vitest.describe("registerDownloadRoutes", function () {
             );
     });
 
+    vitest.it("passes a plain string user-agent through intact", async function () {
+        const servicesResult = buildServices();
+        const services = servicesResult.services;
+        const downloadService = servicesResult.downloadService;
+        const context = createFakeApp(services);
+        await downloadRoutes.registerDownloadRoutes(context.app);
+        const handler = context.routes[0].handler as (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+        const result = {
+            filePath: "/tmp/app.exe",
+            asset: { name: "app.exe", checksum: "abc123" },
+            release: { tag: "v1.0.0" },
+            proxied: false
+        };
+        downloadService.resolveAsset.mockResolvedValue(result);
+
+        // Fastify hands single-value headers over as strings. Indexing a string takes its
+        // first character, which used to turn every UA into one letter and silently force
+        // the linux fallback - the wrong asset or a 404 for nearly every Smart Download.
+        const agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+        const request = createRequest({ app: "app1" }, { version: "v1.0.0" }, { "user-agent": agent });
+        const replyResult = createReply();
+
+        await handler(request, replyResult.reply as unknown as FastifyReply);
+
+        vitest.expect(downloadService.resolveAsset).toHaveBeenCalledWith("app1", {
+            version: "v1.0.0",
+            assetName: undefined,
+            userAgent: agent,
+            platformHint: undefined
+        });
+    });
+
     vitest.it("proxies large assets instead of serving from cache", async function () {
         const servicesResult = buildServices();
         const services = servicesResult.services;
