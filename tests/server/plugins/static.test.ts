@@ -89,6 +89,17 @@ describe("static plugin", function () {
         expect(staticPlugin.resolveIndexPath(existsSyncFn)).toBeUndefined();
     });
 
+    it("skips registration when the root does not exist", async function () {
+        const app = Fastify({ logger: false });
+        const missing = path.join(os.tmpdir(), "download-server-static-missing-" + String(Date.now()));
+
+        // Fresh clone, no build, no public dir: startup must not throw.
+        await staticPlugin.registerStatic(app, missing);
+
+        const response = await app.inject({ method: "GET", url: "/index.html" });
+        expect(response.statusCode).toBe(404);
+    });
+
     it("serves files from the directory it is given", async function () {
         // A root the test controls, so the result cannot depend on whether a build has been run.
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "download-server-static-"));
