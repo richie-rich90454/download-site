@@ -62,7 +62,10 @@ export async function registerDownloadRoutes(app: FastifyInstance): Promise<void
                 const result = await services.download.resolveAsset(appId, {
                     version: query.version,
                     assetName: query.asset,
-                    userAgent: userAgent !== undefined ? userAgent[0] : undefined,
+                    // headerValue, not [0]: a plain string header is not an array, and [0] on a
+                    // string takes its first character - every UA became one letter, detection
+                    // silently fell back to linux, and users got the wrong asset or a 404.
+                    userAgent: headerValue(userAgent),
                     platformHint: query.platform
                 });
                 const range = headerValue(rangeHeader);
