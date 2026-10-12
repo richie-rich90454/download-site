@@ -43,7 +43,7 @@ describe("release-notes-modal when the renderer cannot be loaded", function () {
 
         // The dialog is open and has content. A failed lazy import must not leave a modal with
         // nothing in it, which reads as a broken page rather than a failed download.
-        expect(modal.element.style.display).toBe("flex");
+        expect(modal.element.classList.contains("is-open")).toBe(true);
         const body = modal.element.querySelector(".modal-body");
         expect(body).not.toBe(null);
         if (body !== null) {
@@ -64,6 +64,6 @@ describe("release-notes-modal when the renderer cannot be loaded", function () {
             assets: []
         });
 
-        expect(modal.element.style.display).toBe("flex");
+        expect(modal.element.classList.contains("is-open")).toBe(true);
     });
 });
