@@ -22,6 +22,11 @@ export class DefaultPlatformDetector implements PlatformDetector {
             if (os !== undefined) {
                 return { os: os, arch: arch || "x64" };
             }
+            // The OS name told us nothing, but a parsed arch is still a parsed arch.
+            // Dropping it forced arm64 browsers with exotic UA strings onto x64 builds.
+            if (arch !== undefined) {
+                return { os: "linux", arch: arch };
+            }
         }
         return { os: "linux", arch: "x64" };
     }
@@ -62,11 +67,14 @@ export class DefaultPlatformDetector implements PlatformDetector {
         if (lower.indexOf("x86_64") >= 0 || lower.indexOf("amd64") >= 0 || lower.indexOf("x64") >= 0) {
             return "x64";
         }
+        // A bare "32" is not an architecture: version numbers like 632 match it. Only the
+        // win32 token and a standalone 32 count.
         if (
             lower.indexOf("x86") >= 0 ||
             lower.indexOf("i386") >= 0 ||
             lower.indexOf("i686") >= 0 ||
-            lower.indexOf("32") >= 0
+            lower.indexOf("win32") >= 0 ||
+            /(^|[^a-z0-9])32([^a-z0-9]|$)/.test(lower)
         ) {
             return "x86";
         }
@@ -74,7 +82,8 @@ export class DefaultPlatformDetector implements PlatformDetector {
     }
 
     private parsePlatformHint(hint: string): types.Target {
-        const parts = hint.split("_");
+        // Users type windows-x64, windows/x64 and windows x64 as readily as windows_x64.
+        const parts = hint.split(/[_/\s-]+/);
         const first = parts[0].toLowerCase();
         let os: types.Platform | undefined;
         if (first === "windows" || first === "win") {
@@ -129,12 +138,23 @@ export class DefaultPlatformDetector implements PlatformDetector {
         return undefined;
     }
 
+    /**
+     * Whether the asset name carries a Windows token.
+     *
+     * A bare "win" substring is not one: it matches "darwin", so a macOS-only release set
+     * scored +20 for a Windows target and a lone .dmg went to a Windows user. The token
+     * has to stand on its own - win, win32, win64 or windows, bounded by separators.
+     */
+    private hasWindowsToken(name: string): boolean {
+        return /(^|[^a-z])(win|win32|win64|windows)([^a-z]|$)/.test(name);
+    }
+
     private scoreOs(name: string, os: types.Platform, inferredOs?: types.Platform): number {
         if (inferredOs === os) {
             return 20;
         }
         if (os === "windows") {
-            if (name.indexOf("windows") >= 0 || name.indexOf("win") >= 0) {
+            if (name.indexOf("windows") >= 0 || this.hasWindowsToken(name)) {
                 return 20;
             }
         }
@@ -168,7 +188,9 @@ export class DefaultPlatformDetector implements PlatformDetector {
             }
         }
         if (os === "darwin") {
-            if (name.indexOf(".dmg") >= 0 || name.indexOf(".app.tar.gz") >= 0 || name.indexOf(".app") >= 0) {
+            // ".app" has to be the extension or followed by more extensions: it is a
+            // substring of ".appimage", so a bare indexOf hands Linux AppImages to macOS.
+            if (name.indexOf(".dmg") >= 0 || name.endsWith(".app") || name.indexOf(".app.") >= 0) {
                 return 10;
             }
         }
@@ -207,7 +229,8 @@ export class DefaultPlatformDetector implements PlatformDetector {
                 name.indexOf("x86") >= 0 ||
                 name.indexOf("i386") >= 0 ||
                 name.indexOf("i686") >= 0 ||
-                name.indexOf("32") >= 0
+                name.indexOf("win32") >= 0 ||
+                /(^|[^a-z0-9])32([^a-z0-9]|$)/.test(name)
             ) {
                 return 15;
             }
