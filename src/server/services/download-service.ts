@@ -204,6 +204,12 @@ export class DownloadService {
                 res.destroy();
             }
         });
+        // A client that disconnects mid-download would otherwise leave the file stream
+        // flowing into a dead socket until the file ends - an fd and bandwidth held for
+        // a download nobody receives. Destroying a finished stream is a harmless no-op.
+        res.on("close", function () {
+            stream.destroy();
+        });
         stream.pipe(res);
     }
 
@@ -275,6 +281,19 @@ export class DownloadService {
             requestHeaders.Range = rangeHeader;
         }
         const controller = new AbortController();
+        const res = isFastifyReply(reply) ? reply.raw : reply;
+        let upstreamBody: { destroy: () => void } | null = null;
+        // The client going away must stop the upstream. controller.abort() covers the fetch
+        // while it is in flight, but egress drops its abort forwarding once the response is
+        // returned - and the response timeout is cleared with it. So a trickling upstream
+        // would stream forever with no deadline at all. Destroying the body covers that
+        // phase; both calls are no-ops once their side has finished.
+        res.on("close", function () {
+            controller.abort();
+            if (upstreamBody !== null) {
+                upstreamBody.destroy();
+            }
+        });
         try {
             const response = await this.fetchAsset(url, controller.signal, requestHeaders);
             if (response.statusCode < 200 || response.statusCode >= 300 || response.body === null) {
@@ -292,15 +311,16 @@ export class DownloadService {
                         .status(upstream.status)
                         .send(apiError.toClientError(upstream, requestId !== undefined ? requestId : "unknown"));
                 } else {
-                    reply.statusCode = 502;
-                    reply.end();
+                    if (!res.destroyed) {
+                        reply.statusCode = 502;
+                        reply.end();
+                    }
                 }
                 return;
             }
             if (isFastifyReply(reply)) {
                 reply.hijack();
             }
-            const res = isFastifyReply(reply) ? reply.raw : reply;
             const contentType = asset.contentType.length > 0 ? asset.contentType : this.getContentType(asset.name);
             const headers: Record<string, string | string[]> = {
                 "Content-Type": contentType,
@@ -332,6 +352,10 @@ export class DownloadService {
                     url: url,
                     bytes: bytesSent
                 });
+                // Counted on completion, not on pipe setup: a download the client aborts
+                // halfway must not record the full size as proxied and saved.
+                self.metrics.recordProxiedDownload(appId, release.tag, asset.size);
+                self.metrics.recordProxyBytesSaved(appId, release.tag, asset.size);
             });
             body.on("error", function (err) {
                 self.logger.error("Proxy stream error", { url: url, error: err.message });
@@ -339,9 +363,8 @@ export class DownloadService {
                     res.destroy();
                 }
             });
+            upstreamBody = body;
             body.pipe(res);
-            this.metrics.recordProxiedDownload(appId, release.tag, asset.size);
-            this.metrics.recordProxyBytesSaved(appId, release.tag, asset.size);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.error("Proxy download failed", {
@@ -352,13 +375,19 @@ export class DownloadService {
             });
             if (isFastifyReply(reply)) {
                 // The underlying error can name internal hosts, so it is logged and dropped.
-                const upstream = apiError.Errors.upstreamUnavailable();
-                reply
-                    .status(upstream.status)
-                    .send(apiError.toClientError(upstream, requestId !== undefined ? requestId : "unknown"));
+                // And when the client is already gone there is nobody to answer: sending on a
+                // destroyed reply throws a second error that buries the first.
+                if (!res.destroyed) {
+                    const upstream = apiError.Errors.upstreamUnavailable();
+                    reply
+                        .status(upstream.status)
+                        .send(apiError.toClientError(upstream, requestId !== undefined ? requestId : "unknown"));
+                }
             } else {
-                reply.statusCode = 502;
-                reply.end();
+                if (!reply.destroyed) {
+                    reply.statusCode = 502;
+                    reply.end();
+                }
             }
         } finally {
             // The timeout is owned by the shared egress client, which aborts the same signal.
