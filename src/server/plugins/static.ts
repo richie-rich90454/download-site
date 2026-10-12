@@ -57,6 +57,11 @@ export async function registerStatic(app: FastifyInstance, root?: string): Promi
     // from the presence of a build artifact otherwise makes the result depend on whether anyone
     // has run a build, which is not a property worth asserting on.
     const publicDir = root !== undefined ? root : resolvePublicDir();
+    if (!fs.existsSync(publicDir)) {
+        // Fresh clone with no build and no public dir: serving nothing beats crashing startup.
+        // The not-found handler still answers API routes and the SPA fallback resolves nothing.
+        return;
+    }
     await app.register(fastifyStatic.default, {
         root: publicDir,
         wildcard: true
