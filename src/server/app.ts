@@ -64,6 +64,14 @@ export async function buildApp(services: Services): Promise<FastifyInstance> {
     });
 
     app.setNotFoundHandler(function (request: FastifyRequest, reply: FastifyReply) {
+        // Asset paths are never SPA routes. Serving index.html for them returns 200 + HTML
+        // with a script MIME, which masks real 404s and breaks caches - a stale hashed asset
+        // after a redeploy must 404 loudly instead of booting the app twice.
+        if (request.url.indexOf("/assets/") === 0 || request.url === "/favicon.ico") {
+            const notFound = apiError.Errors.routeNotFound();
+            reply.status(notFound.status).send(apiError.toClientError(notFound, String(request.id)));
+            return;
+        }
         const accept = request.headers.accept;
         const wantsHtml = accept !== undefined && accept.indexOf("text/html") >= 0;
         if (wantsHtml || (request.url.indexOf("/api/") !== 0 && request.url.indexOf("/download/") !== 0)) {
