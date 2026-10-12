@@ -115,9 +115,12 @@ export async function requestAsset(
             if (location === undefined) {
                 return response;
             }
-            // Release the socket back to the pool before following.
+            // Release the socket back to the pool before following. Bounded by the same
+            // signal as the hop itself: a trickling 3xx body must not stall the redirect
+            // past the timeout that already fired. The limit caps a pathological redirect
+            // body that would otherwise be buffered whole.
             if (response.body !== null) {
-                await response.body.dump();
+                await response.body.dump({ limit: 1024 * 1024, signal: controller.signal });
             }
             const next = Array.isArray(location) ? location[0] : location;
             if (next === undefined) {
