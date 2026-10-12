@@ -1,16 +1,16 @@
-import * as prom from "prom-client";
+import * as prom from "@prometheus-io/client";
 
 export class MetricsService {
     readonly registry: prom.Registry;
-    readonly httpRequestsTotal: prom.Counter;
-    readonly httpRequestDurationSeconds: prom.Histogram;
-    readonly cacheHitsTotal: prom.Counter;
-    readonly cacheMissesTotal: prom.Counter;
-    readonly downloadBytesTotal: prom.Counter;
-    readonly proxiedDownloadsTotal: prom.Counter;
-    readonly proxyBytesSavedTotal: prom.Counter;
-    readonly githubApiCallsTotal: prom.Counter;
-    readonly githubApiDurationSeconds: prom.Histogram;
+    readonly httpRequestsTotal: prom.Counter<"method" | "route" | "status">;
+    readonly httpRequestDurationSeconds: prom.Histogram<"method" | "route">;
+    readonly cacheHitsTotal: prom.Counter<"cache">;
+    readonly cacheMissesTotal: prom.Counter<"cache">;
+    readonly downloadBytesTotal: prom.Counter<"app">;
+    readonly proxiedDownloadsTotal: prom.Counter<"app">;
+    readonly proxyBytesSavedTotal: prom.Counter<"app">;
+    readonly githubApiCallsTotal: prom.Counter<"method" | "status">;
+    readonly githubApiDurationSeconds: prom.Histogram<"method">;
 
     constructor() {
         this.registry = new prom.Registry();
@@ -20,14 +20,14 @@ export class MetricsService {
         this.httpRequestsTotal = new prom.Counter({
             name: "http_requests_total",
             help: "Total HTTP requests",
-            labelNames: ["method", "route", "status"],
+            labelNames: ["method", "route", "status"] as const,
             registers: [this.registry]
         });
 
         this.httpRequestDurationSeconds = new prom.Histogram({
             name: "http_request_duration_seconds",
             help: "HTTP request duration in seconds",
-            labelNames: ["method", "route"],
+            labelNames: ["method", "route"] as const,
             buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
             registers: [this.registry]
         });
@@ -35,14 +35,14 @@ export class MetricsService {
         this.cacheHitsTotal = new prom.Counter({
             name: "cache_hits_total",
             help: "Total cache hits",
-            labelNames: ["cache"],
+            labelNames: ["cache"] as const,
             registers: [this.registry]
         });
 
         this.cacheMissesTotal = new prom.Counter({
             name: "cache_misses_total",
             help: "Total cache misses",
-            labelNames: ["cache"],
+            labelNames: ["cache"] as const,
             registers: [this.registry]
         });
 
@@ -53,35 +53,35 @@ export class MetricsService {
         this.downloadBytesTotal = new prom.Counter({
             name: "download_bytes_total",
             help: "Total downloaded bytes",
-            labelNames: ["app"],
+            labelNames: ["app"] as const,
             registers: [this.registry]
         });
 
         this.proxiedDownloadsTotal = new prom.Counter({
             name: "proxied_downloads_total",
             help: "Total proxied downloads",
-            labelNames: ["app"],
+            labelNames: ["app"] as const,
             registers: [this.registry]
         });
 
         this.proxyBytesSavedTotal = new prom.Counter({
             name: "proxy_bytes_saved_total",
             help: "Total bytes saved by proxying instead of caching",
-            labelNames: ["app"],
+            labelNames: ["app"] as const,
             registers: [this.registry]
         });
 
         this.githubApiCallsTotal = new prom.Counter({
             name: "github_api_calls_total",
             help: "Total GitHub API calls",
-            labelNames: ["method", "status"],
+            labelNames: ["method", "status"] as const,
             registers: [this.registry]
         });
 
         this.githubApiDurationSeconds = new prom.Histogram({
             name: "github_api_duration_seconds",
             help: "GitHub API call duration in seconds",
-            labelNames: ["method"],
+            labelNames: ["method"] as const,
             buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
             registers: [this.registry]
         });
