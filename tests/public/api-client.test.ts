@@ -98,4 +98,11 @@ describe("api-client", function () {
         expect(command.indexOf("curl -fsSL") >= 0).toBe(true);
         expect(command.indexOf("app.exe") >= 0).toBe(true);
     });
+
+    test("buildInstallCommand quotes names with spaces", function () {
+        vi.stubGlobal("location", { origin: "https://example.com" });
+        const command = api.buildInstallCommand("randmatqugea", "v1.0.0", "My App Setup.exe");
+        // Unquoted, the shell splits -o My App Setup.exe into three words and curl fails.
+        expect(command.indexOf('-o "My App Setup.exe"') >= 0).toBe(true);
+    });
 });
