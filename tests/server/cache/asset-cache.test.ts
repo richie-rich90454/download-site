@@ -107,6 +107,38 @@ describe("DiskAssetCacheService", function () {
         expect(checksum).toBeUndefined();
     });
 
+    it("waits out a full write buffer instead of buffering the download in memory", async function () {
+        const data = Buffer.alloc(256 * 1024, 7);
+        const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
+        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
+        // A slow disk reports a full buffer from the very first chunk. The download must
+        // wait for drain and still land byte-identical - and above all it must not hang
+        // in the drain wait.
+        const realCreate = fs.createWriteStream.bind(fs);
+        let lies = 0;
+        const createSpy = vi.spyOn(fs, "createWriteStream").mockImplementation(function (file, options) {
+            const created = realCreate(file as string, options as { flags?: string });
+            const originalWrite = created.write.bind(created);
+            created.write = function (chunk: unknown): boolean {
+                originalWrite(chunk as Buffer);
+                lies = lies + 1;
+                return lies > 3;
+            } as typeof created.write;
+            return created;
+        });
+        cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
+
+        try {
+            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+
+            expect(lies > 0).toBe(true);
+            expect(result.cached).toBe(false);
+            expect(fs.readFileSync(result.filePath).equals(data)).toBe(true);
+        } finally {
+            createSpy.mockRestore();
+        }
+    });
+
     it("returns cached path on second request", async function () {
         const data = Buffer.from("cached asset");
         const asset = createAsset("app.zip", data.length, "https://github.com/app.zip");
