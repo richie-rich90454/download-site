@@ -12,7 +12,7 @@ import * as downloadService from "../../../src/server/services/download-service.
 import * as releaseService from "../../../src/server/services/release-service.js";
 import * as assetCache from "../../../src/server/cache/asset-cache.js";
 import * as platform from "../../../src/server/platform/platform-detector.js";
-import { SilentLogger } from "../test-helpers.js";
+import { SilentLogger, RecordingLogger } from "../test-helpers.js";
 
 vi.mock("undici", function () {
     return {
@@ -1047,8 +1047,29 @@ describe("DownloadService", function () {
             prerelease: false,
             assets: [asset]
         };
-        vi.mocked(undici.request).mockResolvedValueOnce(
-            createProxyResponse(data, 200, { "content-length": String(data.length) })
+        // Metrics are recorded when the body finishes, so hold the body to wait for it.
+        let readable: stream.Readable | undefined;
+        vi.mocked(undici.request).mockImplementationOnce(function () {
+            readable = new stream.Readable({
+                read: function () {
+                    this.push(data);
+                    this.push(null);
+                }
+            });
+            return Promise.resolve({
+                statusCode: 200,
+                headers: { "content-length": String(data.length) },
+                body: readable
+            } as unknown as Awaited<ReturnType<typeof undici.request>>);
+        });
+        const finishedMetrics = new metrics.MetricsService();
+        const finishedService = new downloadService.DownloadService(
+            releaseSvc as unknown as releaseService.ReleaseService,
+            assetCacheSvc,
+            new platform.DefaultPlatformDetector(),
+            finishedMetrics,
+            new SilentLogger(),
+            "http://localhost:3000"
         );
 
         const raw = new http.ServerResponse({ method: "GET", url: "/" } as http.IncomingMessage);
@@ -1068,10 +1089,30 @@ describe("DownloadService", function () {
             }
         };
 
-        await service.proxyDownload("app1", asset, release, reply as unknown as import("fastify").FastifyReply);
+        await finishedService.proxyDownload("app1", asset, release, reply as unknown as import("fastify").FastifyReply);
 
         expect(raw.statusCode).toBe(200);
         expect(hijacked).toBe(true);
+        // Metrics are recorded when the body finishes, so wait for the drain to nail it.
+        const readableBody = readable;
+        if (readableBody !== undefined) {
+            await new Promise<void>(function (resolve) {
+                if (readableBody.destroyed || readableBody.readableEnded) {
+                    resolve();
+                    return;
+                }
+                readableBody.on("end", function () {
+                    resolve();
+                });
+                readableBody.on("close", function () {
+                    resolve();
+                });
+            });
+        }
+        // Counted when the body finishes, with the real byte count behind it. The brace
+        // matters: HELP/TYPE headers print for a registered counter even with no samples.
+        const metricsOutput = await finishedMetrics.metrics();
+        expect(metricsOutput.indexOf("proxied_downloads_total{") >= 0).toBe(true);
     });
 
     it("returns 502 when upstream proxy response has no body", async function () {
@@ -1328,6 +1369,150 @@ describe("DownloadService", function () {
 
         expect(result.statusCode).toBe(200);
         expect(result.writableEnded).toBe(true);
+    });
+
+    it("destroys the file stream when the client disconnects mid-download", async function () {
+        const filePath = path.join(tempDir, "big.exe");
+        fs.writeFileSync(filePath, Buffer.alloc(4 * 1024 * 1024, 1));
+        // A destroyed stream never emits end, so "File served" is the observable fate:
+        // logged means the 4 MB drained into a dead socket, absent means it was torn down.
+        const recorder = new RecordingLogger();
+        const abortService = new downloadService.DownloadService(
+            releaseSvc as unknown as releaseService.ReleaseService,
+            assetCacheSvc,
+            new platform.DefaultPlatformDetector(),
+            new metrics.MetricsService(),
+            recorder,
+            "http://localhost:3000"
+        );
+
+        await new Promise<void>(function (resolve, reject) {
+            const server = http.createServer(function (_req, res) {
+                abortService.serveFile(filePath, "big.exe", res);
+            });
+            server.listen(0, function () {
+                const address = server.address();
+                const port = typeof address === "object" && address !== null ? address.port : 0;
+                const client = http.get({ port: port, path: "/" }, function (clientRes) {
+                    clientRes.on("data", function () {
+                        // Gone after the first chunk: the rest of the 4 MB has no recipient.
+                        // The remaining megabytes take far longer to read than this destroy
+                        // takes to land, so end-of-file cannot win the race.
+                        client.destroy();
+                    });
+                    clientRes.on("close", function () {
+                        server.close(function () {
+                            resolve();
+                        });
+                    });
+                });
+                client.on("error", function () {
+                    // Destroying our own socket surfaces here; it is the point, not a failure.
+                });
+                setTimeout(function () {
+                    reject(new Error("client close never arrived"));
+                }, 10000);
+            });
+        });
+
+        await new Promise(function (resolve) {
+            setTimeout(resolve, 500);
+        });
+        expect(recorder.messages("info").indexOf("File served") >= 0).toBe(false);
+    });
+
+    it("aborts the upstream fetch when the proxied client disconnects", async function () {
+        const asset: types.Asset = {
+            name: "app.exe",
+            size: 100,
+            contentType: "application/octet-stream",
+            url: "https://github.com/app.exe",
+            browserDownloadUrl: "https://github.com/app.exe"
+        };
+        const release: types.Release = {
+            tag: "v1.0.0",
+            name: "Release v1.0.0",
+            notes: "Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: [asset]
+        };
+        // An upstream that sends one chunk and then stalls forever: without teardown
+        // the proxy would run with no deadline at all - egress clears its timeout once the
+        // response is returned, so nothing but the client-close handler can stop it.
+        // seenSignal pins the wiring for the in-flight phase; trickle.destroyed pins the
+        // streaming phase, which abort() alone cannot reach after egress drops forwarding.
+        let seenSignal: AbortSignal | undefined;
+        const trickle = new stream.Readable({
+            read: function () {
+                // Nothing further: the body stays open until destroyed.
+            }
+        });
+        trickle.push(Buffer.from("first"));
+        vi.mocked(undici.request).mockImplementationOnce(function (_url, options) {
+            if (options !== undefined && options.signal instanceof AbortSignal) {
+                seenSignal = options.signal;
+            }
+            return Promise.resolve({
+                statusCode: 200,
+                headers: {},
+                body: trickle
+            } as unknown as Awaited<ReturnType<typeof undici.request>>);
+        });
+        const metricsSvc = new metrics.MetricsService();
+        const abortService = new downloadService.DownloadService(
+            releaseSvc as unknown as releaseService.ReleaseService,
+            assetCacheSvc,
+            new platform.DefaultPlatformDetector(),
+            metricsSvc,
+            new SilentLogger(),
+            "http://localhost:3000"
+        );
+
+        await new Promise<void>(function (resolve, reject) {
+            const server = http.createServer(function (_req, res) {
+                abortService.proxyDownload("app1", asset, release, res).catch(function () {
+                    // The client is gone; there is nobody to report to.
+                });
+            });
+            server.listen(0, function () {
+                const address = server.address();
+                const port = typeof address === "object" && address !== null ? address.port : 0;
+                const client = http.get({ port: port, path: "/" }, function (clientRes) {
+                    clientRes.on("data", function () {
+                        client.destroy();
+                    });
+                    clientRes.on("close", function () {
+                        server.close(function () {
+                            resolve();
+                        });
+                    });
+                });
+                client.on("error", function () {
+                    // Destroying our own socket surfaces here; it is the point, not a failure.
+                });
+                setTimeout(function () {
+                    reject(new Error("client close never arrived"));
+                }, 10000);
+            });
+        });
+
+        expect(seenSignal).not.toBe(undefined);
+        let tornDown = trickle.destroyed;
+        for (let i = 0; i < 100 && !tornDown; i = i + 1) {
+            await new Promise(function (resolve) {
+                setTimeout(resolve, 30);
+            });
+            tornDown = trickle.destroyed;
+        }
+        expect(tornDown).toBe(true);
+        trickle.destroy();
+        // Counted on completion, not on pipe setup: the aborted download must leave no
+        // proxied series behind.
+        const metricsOutput = await metricsSvc.metrics();
+        // Sample lines carry labels in braces; HELP/TYPE headers print regardless, so the
+        // brace is what distinguishes a download that actually completed.
+        expect(metricsOutput.indexOf("proxied_downloads_total{") >= 0).toBe(false);
     });
 
     it("returns 502 via Fastify reply when proxy download fetch rejects with non-error", async function () {
