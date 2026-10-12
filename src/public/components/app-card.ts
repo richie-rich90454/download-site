@@ -308,7 +308,15 @@ export function createAppCard(store: Store, modal: ReleaseNotesModal, appName: s
             smart.textContent = "Smart Download";
             group.appendChild(smart);
         }
-        smart.href = buildSmartDownloadUrl(appState.appName, appState.selectedVersion);
+        // No version selected yet means no download target. An href with an empty version
+        // 4xxs in the same tab and loses the page state, so the link stays inert instead.
+        if (appState.selectedVersion === "") {
+            smart.setAttribute("aria-disabled", "true");
+            smart.removeAttribute("href");
+        } else {
+            smart.removeAttribute("aria-disabled");
+            smart.href = buildSmartDownloadUrl(appState.appName, appState.selectedVersion);
+        }
 
         const update = appState.updateData;
         let index = 1;
