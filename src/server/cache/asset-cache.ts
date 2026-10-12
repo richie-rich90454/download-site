@@ -362,7 +362,23 @@ export class DiskAssetCacheService implements AssetCacheService {
             try {
                 for await (const chunk of body) {
                     const buffer = chunk;
-                    fileStream.write(buffer);
+                    // Respect a full write buffer: ignoring it buffers the whole download in
+                    // memory when the disk is slower than the socket, which for multi-hundred
+                    // megabyte installers is the download itself twice over.
+                    if (!fileStream.write(buffer)) {
+                        await new Promise<void>(function (resolve, reject) {
+                            function onDrain(): void {
+                                fileStream.removeListener("error", onError);
+                                resolve();
+                            }
+                            function onError(err: Error): void {
+                                fileStream.removeListener("drain", onDrain);
+                                reject(err);
+                            }
+                            fileStream.once("drain", onDrain);
+                            fileStream.once("error", onError);
+                        });
+                    }
                     hash.update(buffer);
                 }
                 await new Promise<void>(function (resolve, reject) {
