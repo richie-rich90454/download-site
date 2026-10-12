@@ -50,22 +50,25 @@ describe("index.html", function () {
         expect(html).not.toContain('app-grid">app');
     });
 
-    test("draws the page as one window with a caption bar", function () {
+    test("draws the page as one chromeless window with a title bar", function () {
         expect(html.indexOf('class="window-chrome"') >= 0).toBe(true);
         expect(html.indexOf('class="window-body"') >= 0).toBe(true);
         // The heading is the window title, so it lives in the title bar rather than the body.
         expect(html.indexOf('class="window-title"') >= 0).toBe(true);
+        // No caption buttons, taskbar, or start menu: the window owns the viewport and
+        // there is nothing to minimise to or close into.
+        expect(html).not.toContain("caption-button");
+        expect(html).not.toContain("taskbar");
+        expect(html).not.toContain("start-menu");
+        expect(html).not.toContain("desktop-icon");
     });
 
-    test("hides the decorative caption buttons from assistive technology", function () {
-        expect(html.indexOf('class="caption-buttons" aria-hidden="true"') >= 0).toBe(true);
-        // A control that does nothing is worse than no control, and a screen reader announcing
-        // three unnamed buttons that go nowhere is the worst version of that.
-        expect(html).not.toContain('<button class="caption-button');
+    test("references the orb favicon", function () {
+        expect(html.indexOf('rel="icon" type="image/svg+xml" href="/favicon.svg"') >= 0).toBe(true);
+        expect(html.indexOf('name="theme-color"') >= 0).toBe(true);
     });
 
-    test("declares a colour scheme and a description", function () {
-        expect(html.indexOf('name="color-scheme"') >= 0).toBe(true);
-        expect(html.indexOf('name="description"') >= 0).toBe(true);
+    test("tells users without JavaScript what is missing", function () {
+        expect(html.indexOf("<noscript>") >= 0).toBe(true);
     });
 });
