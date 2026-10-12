@@ -40,6 +40,45 @@ describe("app-card", function () {
         }
     });
 
+    test("smart download stays inert until a version is selected", async function () {
+        const release: PublicRelease = {
+            tag: "v1.0.0",
+            name: "v1.0.0",
+            notes: "Notes",
+            publishedAt: "2024-01-01T00:00:00Z",
+            prerelease: false,
+            assets: []
+        };
+        const update: UpdateResponse = {
+            version: "v1.0.0",
+            publishedAt: "2024-01-01T00:00:00Z",
+            releaseNotes: "Notes",
+            assets: []
+        };
+        fetchMock.mockImplementation(function (url: string) {
+            if (url.indexOf("/api/releases/") >= 0) {
+                return Promise.resolve(createFetchResponse({ releases: [release] }));
+            }
+            return Promise.resolve(createFetchResponse(update));
+        });
+        const card = createAppCard(store, modal, "randmatqugea", "RandMatQuGeA");
+        await card.load();
+        const smart = card.element.querySelector<HTMLAnchorElement>(".btn-primary");
+        expect(smart).not.toBe(null);
+        if (smart === null) {
+            return;
+        }
+        expect(smart.href.indexOf("version=v1.0.0") >= 0).toBe(true);
+        // An empty selection (a blank ?version= query param) must not produce an empty
+        // ?version= link: it 4xxs in the same tab and loses the page state.
+        store.selectVersion("randmatqugea", "");
+        expect(smart.getAttribute("aria-disabled")).toBe("true");
+        expect(smart.hasAttribute("href")).toBe(false);
+        store.selectVersion("randmatqugea", "v1.0.0");
+        expect(smart.hasAttribute("aria-disabled")).toBe(false);
+        expect(smart.href.indexOf("version=v1.0.0") >= 0).toBe(true);
+    });
+
     test("renders loading skeleton while loading", function () {
         const card = createAppCard(store, modal, "randmatqugea", "RandMatQuGeA");
         store.setLoading("randmatqugea");
@@ -295,7 +334,7 @@ describe("app-card", function () {
             await new Promise(function (resolve) {
                 setTimeout(resolve, 50);
             });
-            expect(modal.element.style.display).toBe("flex");
+            expect(modal.element.classList.contains("is-open")).toBe(true);
         }
     });
 
@@ -986,7 +1025,7 @@ describe("app-card", function () {
             await new Promise(function (resolve) {
                 setTimeout(resolve, 50);
             });
-            expect(modal.element.style.display).toBe("none");
+            expect(modal.element.classList.contains("is-open")).toBe(false);
         }
     });
 
@@ -1022,7 +1061,7 @@ describe("app-card", function () {
             await new Promise(function (resolve) {
                 setTimeout(resolve, 50);
             });
-            expect(modal.element.style.display).toBe("none");
+            expect(modal.element.classList.contains("is-open")).toBe(false);
         }
     });
 
@@ -1257,7 +1296,7 @@ describe("app-card", function () {
             await new Promise(function (resolve) {
                 setTimeout(resolve, 50);
             });
-            expect(modal.element.style.display).toBe("none");
+            expect(modal.element.classList.contains("is-open")).toBe(false);
         }
     });
 
@@ -1291,7 +1330,7 @@ describe("app-card", function () {
             await new Promise(function (resolve) {
                 setTimeout(resolve, 50);
             });
-            expect(modal.element.style.display).toBe("none");
+            expect(modal.element.classList.contains("is-open")).toBe(false);
         }
     });
 
