@@ -8,8 +8,12 @@ describe("release-notes-modal", function () {
 
     test("creates modal element hidden by default", function () {
         const modal = createReleaseNotesModal();
-        expect(modal.element.style.display).toBe("none");
-        expect(modal.element.getAttribute("role")).toBe("dialog");
+        expect(modal.element.classList.contains("is-open")).toBe(false);
+        const dialog = modal.element.querySelector(".modal-dialog");
+        expect(dialog).not.toBe(null);
+        if (dialog !== null) {
+            expect(dialog.getAttribute("role")).toBe("dialog");
+        }
     });
 
     test("fetches the renderer once across repeated opens", async function () {
@@ -46,7 +50,7 @@ describe("release-notes-modal", function () {
             prerelease: false,
             assets: []
         });
-        expect(modal.element.style.display).toBe("flex");
+        expect(modal.element.classList.contains("is-open")).toBe(true);
         const body = modal.element.querySelector(".modal-body");
         expect(body).not.toBe(null);
         if (body !== null) {
@@ -66,7 +70,7 @@ describe("release-notes-modal", function () {
             assets: []
         });
         modal.close();
-        expect(modal.element.style.display).toBe("none");
+        expect(modal.element.classList.contains("is-open")).toBe(false);
     });
 
     test("clicking backdrop closes modal", async function () {
@@ -81,10 +85,10 @@ describe("release-notes-modal", function () {
         });
         const event = new MouseEvent("click", { bubbles: true });
         modal.element.dispatchEvent(event);
-        expect(modal.element.style.display).toBe("none");
+        expect(modal.element.classList.contains("is-open")).toBe(false);
     });
 
-    test("escape key closes modal", async function () {
+    test("escape key closes modal even when focus is outside it", async function () {
         const modal = createReleaseNotesModal();
         await modal.open({
             tag: "v1.0.0",
@@ -94,9 +98,11 @@ describe("release-notes-modal", function () {
             prerelease: false,
             assets: []
         });
+        // Dispatched on the document without bubbling from the backdrop: the handler lives on
+        // the document precisely so Esc works wherever focus sits.
         const event = new KeyboardEvent("keydown", { key: "Escape" });
-        modal.element.dispatchEvent(event);
-        expect(modal.element.style.display).toBe("none");
+        document.dispatchEvent(event);
+        expect(modal.element.classList.contains("is-open")).toBe(false);
     });
 
     test("close button hides modal", async function () {
@@ -113,7 +119,7 @@ describe("release-notes-modal", function () {
         expect(closeButton).not.toBe(null);
         if (closeButton !== null) {
             closeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-            expect(modal.element.style.display).toBe("none");
+            expect(modal.element.classList.contains("is-open")).toBe(false);
         }
     });
 
@@ -157,6 +163,6 @@ describe("release-notes-modal", function () {
         });
         const event = new KeyboardEvent("keydown", { key: "Enter" });
         modal.element.dispatchEvent(event);
-        expect(modal.element.style.display).toBe("flex");
+        expect(modal.element.classList.contains("is-open")).toBe(true);
     });
 });
