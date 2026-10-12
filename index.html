@@ -3,11 +3,13 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta name="color-scheme" content="light dark" />
+        <meta name="color-scheme" content="light" />
+        <meta name="theme-color" content="#1b5e73" />
         <meta
             name="description"
             content="Download installers for Richard's Blogs applications, and check for updates."
         />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <title>Richard's Blogs - Application Download</title>
     </head>
     <body>
@@ -15,41 +17,38 @@
             You are currently offline. Some features may be unavailable.
         </div>
 
-        <!--
-            The page is drawn as one Aero window. The caption buttons are decoration and are hidden
-            from assistive technology on purpose: a control that does nothing is worse than no
-            control, and the only real one in this document is the release-notes close button.
-        -->
-        <div class="container">
-            <div class="window-chrome">
-                <span class="window-icon" aria-hidden="true"></span>
-                <h1 class="window-title">Richard's Blogs - Application Download</h1>
-                <div class="caption-buttons" aria-hidden="true">
-                    <span class="caption-button caption-button--min"></span>
-                    <span class="caption-button caption-button--max"></span>
-                    <span class="caption-button"></span>
+        <main class="desktop" id="desktop">
+            <!-- The page is drawn as one Aero window that owns the viewport. -->
+            <div class="container" id="window">
+                <div class="window-chrome">
+                    <img class="window-icon" src="/favicon.svg" alt="" width="16" height="16" />
+                    <h1 class="window-title">Richard's Blogs - Application Download</h1>
+                </div>
+
+                <div class="window-body">
+                    <div class="title-row">
+                        <h2>Choose your app &amp; platform</h2>
+                        <div class="subhead">Installers are served from this server, not from GitHub.</div>
+                    </div>
+
+                    <div class="search-bar">
+                        <label for="release-search">Search releases</label>
+                        <input
+                            id="release-search"
+                            type="search"
+                            placeholder="Filter by version or keywords..."
+                            autocomplete="off"
+                        />
+                    </div>
+
+                    <div id="app-grid" class="app-grid"></div>
                 </div>
             </div>
+        </main>
 
-            <div class="window-body">
-                <div class="title-row">
-                    <h2>Choose your app &amp; platform</h2>
-                    <div class="subhead">Installers are served from this server, not from GitHub.</div>
-                </div>
-
-                <div class="search-bar">
-                    <label for="release-search">Search releases</label>
-                    <input
-                        id="release-search"
-                        type="search"
-                        placeholder="Filter by version or keywords..."
-                        autocomplete="off"
-                    />
-                </div>
-
-                <div id="app-grid" class="app-grid"></div>
-            </div>
-        </div>
+        <noscript>
+            <div class="noscript-note">This page needs JavaScript to list downloads. Enable it and reload.</div>
+        </noscript>
 
         <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
         <script type="module" src="/src/public/script.ts"></script>
