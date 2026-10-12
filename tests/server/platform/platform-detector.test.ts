@@ -128,6 +128,58 @@ describe("DefaultPlatformDetector", function () {
         expect(target.arch).toBe("arm64");
     });
 
+    it("parses platform hints with dashes, slashes and spaces", function () {
+        const dash = detector.detectTarget("", "windows-x64");
+        expect(dash.os).toBe("windows");
+        expect(dash.arch).toBe("x64");
+
+        const slash = detector.detectTarget("", "darwin/arm64");
+        expect(slash.os).toBe("darwin");
+        expect(slash.arch).toBe("arm64");
+
+        const space = detector.detectTarget("", "linux x86");
+        expect(space.os).toBe("linux");
+        expect(space.arch).toBe("x86");
+    });
+
+    it("never serves a darwin-named asset to a windows target", function () {
+        // "darwin" contains the substring "win". Matching it gave a macOS-only release set
+        // +20 for windows and handed a lone .dmg to a Windows user.
+        const assets = [createAsset("app-darwin-x64.dmg")];
+        const target: types.Target = { os: "windows", arch: "x64" };
+
+        expect(detector.selectAsset(assets, target)).toBeUndefined();
+    });
+
+    it("still matches win32 and win64 asset names for windows", function () {
+        const assets = [createAsset("app-win32.exe"), createAsset("app-macos.dmg")];
+        const target: types.Target = { os: "windows", arch: "x86" };
+
+        const selected = detector.selectAsset(assets, target);
+        expect(selected !== undefined ? selected.name : undefined).toBe("app-win32.exe");
+    });
+
+    it("does not hand a linux appimage to macos for its .app substring", function () {
+        // ".app" is inside ".appimage". A bare substring match scored +10 for darwin, so a
+        // macOS set containing only an AppImage looked better than it was.
+        const assets = [createAsset("mac-app.AppImage"), createAsset("mac.dmg")];
+        const target: types.Target = { os: "darwin", arch: "x64" };
+
+        const selected = detector.selectAsset(assets, target);
+        expect(selected !== undefined ? selected.name : undefined).toBe("mac.dmg");
+    });
+
+    it("does not read an architecture from a glued-in 32", function () {
+        expect(detector.normalizeArch("v632")).toBeUndefined();
+        expect(detector.normalizeArch("aarch32")).toBeUndefined();
+
+        // But the real tokens still work, in names and in hints alike.
+        const assets = [createAsset("app-632.exe"), createAsset("app-x86.exe")];
+        const target: types.Target = { os: "windows", arch: "x86" };
+        const selected = detector.selectAsset(assets, target);
+        expect(selected !== undefined ? selected.name : undefined).toBe("app-x86.exe");
+    });
+
     it("parses macos platform hint", function () {
         const target = detector.detectTarget("", "macos_x64");
 
