@@ -1484,6 +1484,24 @@ vitest.describe("buildApp", function () {
         vitest.expect(body.error.requestId).toBeDefined();
     });
 
+    vitest.it("returns json 404 for asset paths instead of the spa page", async function () {
+        const app = await appFactory.buildApp(services);
+
+        // A stale hashed chunk after a redeploy must 404 loudly. Serving index.html here
+        // returns 200 + HTML with a script MIME and boots the app a second time.
+        const stale = await app.inject({
+            method: "GET",
+            url: "/assets/index-stale.js",
+            headers: { accept: "text/html" }
+        });
+        vitest.expect(stale.statusCode).toBe(404);
+        vitest.expect(JSON.parse(stale.payload).error.code).toBe("NOT_FOUND");
+
+        const icon = await app.inject({ method: "GET", url: "/favicon.ico" });
+        vitest.expect(icon.statusCode).toBe(404);
+        vitest.expect(JSON.parse(icon.payload).error.code).toBe("NOT_FOUND");
+    });
+
     vitest.it("returns live status", async function () {
         const app = await appFactory.buildApp(services);
 
