@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as stream from "node:stream";
 import * as undici from "undici";
+import * as fsp from "node:fs/promises";
 import Database from "better-sqlite3";
 import * as types from "../../../src/shared/types.js";
 import * as metrics from "../../../src/server/telemetry/metrics.js";
@@ -33,6 +34,16 @@ vi.mock("node:fs", async function () {
     });
 });
 
+// The write path goes through fs/promises, so one test has to make its open fail. A module mock
+// is the only way to reach it: ESM namespaces are not configurable, which is what vi.spyOn
+// reports on the real import.
+vi.mock("node:fs/promises", async function () {
+    const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    return Object.assign({}, actual, {
+        open: vi.fn(actual.open)
+    });
+});
+
 function createAsset(name: string, size: number, url: string): types.Asset {
     return {
         name: name,
@@ -48,6 +59,26 @@ function createResponse(body: Buffer): Awaited<ReturnType<typeof undici.request>
         read: function () {
             this.push(body);
             this.push(null);
+        }
+    });
+    return {
+        statusCode: 200,
+        headers: {},
+        body: readable
+    } as unknown as Awaited<ReturnType<typeof undici.request>>;
+}
+
+/** The same bytes, delivered in chunks the way a real response arrives. */
+function createChunkedResponse(body: Buffer, chunkSize: number): Awaited<ReturnType<typeof undici.request>> {
+    let offset = 0;
+    const readable = new stream.Readable({
+        read: function () {
+            if (offset >= body.length) {
+                this.push(null);
+                return;
+            }
+            this.push(body.subarray(offset, offset + chunkSize));
+            offset = offset + chunkSize;
         }
     });
     return {
@@ -110,33 +141,20 @@ describe("DiskAssetCacheService", function () {
     it("waits out a full write buffer instead of buffering the download in memory", async function () {
         const data = Buffer.alloc(256 * 1024, 7);
         const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
-        vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
-        // A slow disk reports a full buffer from the very first chunk. The download must
-        // wait for drain and still land byte-identical - and above all it must not hang
-        // in the drain wait.
-        const realCreate = fs.createWriteStream.bind(fs);
-        let lies = 0;
-        const createSpy = vi.spyOn(fs, "createWriteStream").mockImplementation(function (file, options) {
-            const created = realCreate(file as string, options as { flags?: string });
-            const originalWrite = created.write.bind(created);
-            created.write = function (chunk: unknown): boolean {
-                originalWrite(chunk as Buffer);
-                lies = lies + 1;
-                return lies > 3;
-            } as typeof created.write;
-            return created;
-        });
+        // A slow disk reported as a full buffer used to be discarded: the whole download then
+        // sat in the write stream's memory waiting for the socket, which for a multi-hundred
+        // megabyte installer is the download twice over. Writes are awaited one chunk at a
+        // time, so the buffering case cannot arise; this pins the behaviour it replaced.
+        vi.mocked(undici.request).mockResolvedValueOnce(createChunkedResponse(data, 32 * 1024));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
-        try {
-            const result = await cache.getAssetPath("app1", "v1.0.0", asset);
+        const result = await cache.getAssetPath("app1", "v1.0.0", asset);
 
-            expect(lies > 0).toBe(true);
-            expect(result.cached).toBe(false);
-            expect(fs.readFileSync(result.filePath).equals(data)).toBe(true);
-        } finally {
-            createSpy.mockRestore();
-        }
+        expect(result.cached).toBe(false);
+        expect(fs.readFileSync(result.filePath).equals(data)).toBe(true);
+        expect(cache.getChecksum("app1", "v1.0.0", "app.exe")).toBe(
+            crypto.createHash("sha256").update(data).digest("hex")
+        );
     });
 
     it("returns cached path on second request", async function () {
@@ -632,16 +650,20 @@ describe("DiskAssetCacheService", function () {
     it("bounds how many assets download at once", async function () {
         // Distinct assets, so the in-flight map cannot collapse them. Without a bound, a burst of
         // first-time downloads holds a socket, a write stream and a temp file each on a 2 vCPU box.
+        //
+        // The upstream answers immediately rather than after a real timer. A 5 ms wait made this
+        // test measure the machine's load rather than the bound: on a loaded box the six downloads
+        // could not finish inside the suite's timeout and the reported failure moved to whichever
+        // test happened to be running. The bound holds regardless of upstream latency - if the
+        // semaphore were removed all six would overlap and peak would be 6.
         let peak = 0;
         let active = 0;
         vi.mocked(undici.request).mockImplementation(function () {
             active = active + 1;
             peak = Math.max(peak, active);
-            return new Promise(function (resolve) {
-                setTimeout(function () {
-                    active = active - 1;
-                    resolve(createResponse(Buffer.from("payload")));
-                }, 5);
+            return Promise.resolve(createResponse(Buffer.from("payload"))).then(function (response) {
+                active = active - 1;
+                return response;
             });
         });
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService, {
@@ -658,6 +680,7 @@ describe("DiskAssetCacheService", function () {
             const asset = createAsset("file-" + String(i) + ".exe", 7, "https://github.com/file-" + String(i) + ".exe");
             requests.push(cache.getAssetPath("app1", "v1.0.0", asset));
         }
+        // Straight after the burst: four downloads are waiting behind the two slots.
         expect(cache.pendingDownloads).toBeGreaterThan(0);
         await Promise.all(requests);
 
@@ -696,7 +719,7 @@ describe("DiskAssetCacheService", function () {
         }
     });
 
-    it("cleans up temp file when file stream errors", async function () {
+    it("cleans up the temp file when the write fails", async function () {
         const data = Buffer.from("hello");
         const asset = createAsset("app.exe", data.length, "https://github.com/app.exe");
         const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(12345);
@@ -704,26 +727,15 @@ describe("DiskAssetCacheService", function () {
         fs.mkdirSync(assetDir, { recursive: true });
         const tempPath = path.join(assetDir, "app.exe.tmp12345");
         fs.writeFileSync(tempPath, "");
-        const errorStream = new stream.PassThrough();
-        (errorStream as unknown as { on: (event: string, listener: (err: Error) => void) => void }).on = function (
-            event: string,
-            listener: (err: Error) => void
-        ): void {
-            if (event === "error") {
-                listener(new Error("write failed"));
-            }
-        };
-        const createWriteStreamSpy = vi
-            .spyOn(fs, "createWriteStream")
-            .mockReturnValue(errorStream as unknown as fs.WriteStream);
+        vi.mocked(fsp.open).mockRejectedValueOnce(new Error("write failed"));
         vi.mocked(undici.request).mockResolvedValueOnce(createResponse(data));
         cache = new assetCache.DiskAssetCacheService(tempDir, new SilentLogger(), metricsService);
 
         await expect(cache.getAssetPath("app1", "v1.0.0", asset)).rejects.toThrow("write failed");
+        // The half-written file must not survive as a cache entry candidate.
         expect(fs.existsSync(tempPath)).toBe(false);
 
         dateNowSpy.mockRestore();
-        createWriteStreamSpy.mockRestore();
     });
 
     describe("O(1) hit validation", function () {
