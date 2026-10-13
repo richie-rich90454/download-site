@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { and, asc, count, eq, sql, type SQL } from "drizzle-orm";
 import * as types from "../../shared/types.js";
@@ -347,52 +348,22 @@ export class DiskAssetCacheService implements AssetCacheService {
         try {
             const response = await egress.requestAsset(url, { signal: controller.signal });
             if (response.statusCode < 200 || response.statusCode >= 300) {
-                throw new Error("Asset download failed with status " + response.statusCode);
+                throw new Error("Asset download failed with status " + String(response.statusCode));
             }
             const body = response.body as AsyncIterable<Buffer> | null;
             if (body === null) {
                 throw new Error("Asset download response body is empty");
             }
             const hash = crypto.createHash("sha256");
-            const fileStream = fs.createWriteStream(tempPath);
-            let streamError: Error | undefined;
-            fileStream.on("error", function (err) {
-                streamError = err;
-            });
+            const handle = await fsp.open(tempPath, "w");
             try {
                 for await (const chunk of body) {
                     const buffer = chunk;
-                    // Respect a full write buffer: ignoring it buffers the whole download in
-                    // memory when the disk is slower than the socket, which for multi-hundred
-                    // megabyte installers is the download itself twice over.
-                    if (!fileStream.write(buffer)) {
-                        await new Promise<void>(function (resolve, reject) {
-                            function onDrain(): void {
-                                fileStream.removeListener("error", onError);
-                                resolve();
-                            }
-                            function onError(err: Error): void {
-                                fileStream.removeListener("drain", onDrain);
-                                reject(err);
-                            }
-                            fileStream.once("drain", onDrain);
-                            fileStream.once("error", onError);
-                        });
-                    }
+                    await handle.write(buffer, 0, buffer.length);
                     hash.update(buffer);
                 }
-                await new Promise<void>(function (resolve, reject) {
-                    fileStream.end(function () {
-                        if (streamError !== undefined) {
-                            reject(streamError);
-                        } else {
-                            resolve();
-                        }
-                    });
-                });
-            } catch (err) {
-                fileStream.destroy();
-                throw err;
+            } finally {
+                await handle.close();
             }
             const checksum = hash.digest("hex");
             await this.makeRoom(asset.size);
